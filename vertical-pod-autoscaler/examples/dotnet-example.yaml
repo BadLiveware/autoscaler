@@ -1,0 +1,171 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dotnet-vpa-example
+---
+# .NET application deployment with OpenTelemetry instrumentation
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dotnet-app
+  namespace: dotnet-vpa-example
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: dotnet-app
+  template:
+    metadata:
+      labels:
+        app: dotnet-app
+      annotations:
+        # Enable OpenTelemetry runtime instrumentation
+        opentelemetry.io/inject-instrumentation: "true"
+    spec:
+      containers:
+      - name: app
+        image: myregistry/dotnet-app:latest
+        ports:
+        - containerPort: 8080
+        env:
+        # OpenTelemetry .NET Runtime Instrumentation configuration
+        - name: OTEL_DOTNET_AUTO_PLUGINS
+          value: "dotnet_runtime_instrumentation"
+        - name: OTEL_METRICS_EXPORTER
+          value: "prometheus"
+        - name: OTEL_EXPORTER_PROMETHEUS_ENDPOINT
+          value: "http://0.0.0.0:9090/metrics"
+        # .NET Server GC configuration for optimal memory management
+        - name: DOTNET_gcServer
+          value: "1"
+        - name: DOTNET_GCConserveMemory
+          value: "1"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+---
+# Service for the .NET application
+apiVersion: v1
+kind: Service
+metadata:
+  name: dotnet-app-service
+  namespace: dotnet-vpa-example
+spec:
+  selector:
+    app: dotnet-app
+  ports:
+  - port: 8080
+    targetPort: 8080
+---
+# ServiceMonitor for Prometheus to scrape .NET metrics
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: dotnet-app-metrics
+  namespace: dotnet-vpa-example
+spec:
+  selector:
+    matchLabels:
+      app: dotnet-app
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s
+---
+# VPA configuration using external metrics for .NET memory management
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: dotnet-app-vpa
+  namespace: dotnet-vpa-example
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: dotnet-app
+  updatePolicy:
+    updateMode: "Auto"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: app
+      # Configure memory scaling based on .NET GC metrics
+      minAllowed:
+        memory: 64Mi
+      maxAllowed:
+        memory: 2Gi
+      # Focus VPA on memory recommendations since we're using external metrics
+      controlledResources: ["memory"]
+---
+# Example VPA Recommender deployment configured for external .NET metrics
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vpa-recommender-dotnet
+  namespace: kube-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vpa-recommender-dotnet
+  template:
+    metadata:
+      labels:
+        app: vpa-recommender-dotnet
+    spec:
+      serviceAccountName: vpa-recommender
+      containers:
+      - name: recommender
+        image: registry.k8s.io/autoscaling/vpa-recommender:1.0.0
+        args:
+        - --v=4
+        - --stderrthreshold=info
+        - --recommender-name=dotnet-recommender
+        # Enable external metrics support
+        - --use-external-metrics=true
+        # Use .NET GC-managed memory metric instead of container memory
+        - --external-metrics-memory-metric=process_runtime_dotnet_gc_objects_size
+        # Use .NET exception metric for OOM detection
+        - --external-metrics-oom-metric=dotnet_exceptions_total{type="System.OutOfMemoryException"}
+        # Configure container name label for metric correlation
+        - --container-name-label=container
+        ports:
+        - containerPort: 8942
+        resources:
+          requests:
+            cpu: 50m
+            memory: 500Mi
+          limits:
+            cpu: 200m
+            memory: 1000Mi
+---
+# Configuration example showing the metrics that should be available:
+# 
+# 1. process_runtime_dotnet_gc_objects_size - measures actual GC-managed memory
+#    - This excludes CLR overhead and pre-allocated memory pools
+#    - Labels: pod, container, namespace
+#    - Value: bytes of memory managed by GC
+#
+# 2. dotnet_exceptions_total{type="System.OutOfMemoryException"} - counts OOM exceptions
+#    - This tracks .NET OOM exceptions that don't trigger Kubernetes OOMKilled
+#    - Labels: pod, container, namespace, type
+#    - Value: cumulative count of exceptions
+#
+# Prerequisites:
+# 1. OpenTelemetry .NET Runtime Instrumentation in your .NET applications
+# 2. Prometheus server configured to scrape application metrics
+# 3. Prometheus Adapter configured to expose custom metrics API
+# 4. VPA CRDs and RBAC configured in the cluster
+#
+# Usage:
+# kubectl apply -f dotnet-example.yaml
+#
+# Monitor VPA recommendations:
+# kubectl describe vpa dotnet-app-vpa -n dotnet-vpa-example
+#
+# View .NET memory metrics:
+# kubectl port-forward svc/dotnet-app-service 8080:8080 -n dotnet-vpa-example
+# curl http://localhost:8080/metrics | grep process_runtime_dotnet_gc_objects_size 

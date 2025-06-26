@@ -68,6 +68,7 @@ This document is auto-generated from the flag definitions in the VPA recommender
 | `cpu-integer-post-processor-enabled` |  |  | Enable the cpu-integer recommendation post processor. The post processor will round up CPU recommendations to a whole CPU for pods which were opted in by setting an appropriate label on VPA object (experimental) |
 | `external-metrics-cpu-metric` | string |  | ALPHA.  Metric to use with external metrics provider for CPU usage. |
 | `external-metrics-memory-metric` | string |  | ALPHA.  Metric to use with external metrics provider for memory usage. |
+| `external-metrics-oom-metric` | string |  | ALPHA.  Metric to use with external metrics provider for OOM detection (e.g., dotnet_exceptions_total{type="System.OutOfMemoryException"}). |
 | `feature-gates` | mapStringBool |  | A set of key=value pairs that describe feature gates for alpha/experimental features. Options are:<br>AllAlpha=true\|false (ALPHA - default=false)<br>AllBeta=true\|false (BETA - default=false)<br>InPlaceOrRecreate=true\|false (ALPHA - default=false) |
 | `history-length` | string |  "8d" | How much time back prometheus have to be queried to get historical metrics  |
 | `history-resolution` | string |  "1h" | Resolution at which Prometheus is queried for historical metrics  |
