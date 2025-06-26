@@ -38,11 +38,13 @@ import (
 	fakeautoscalingv1 "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/clientset/versioned/typed/autoscaling.k8s.io/v1/fake"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input/history"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input/metrics"
+	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input/oom"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input/spec"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/model"
 	controllerfetcher "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/target/controller_fetcher"
 	target_mock "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/target/mock"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/utils/test"
+	"k8s.io/client-go/rest"
 )
 
 type fakeControllerFetcher struct {
@@ -933,4 +935,114 @@ func TestCanCleanupCheckpoints(t *testing.T) {
 	for _, vpa := range vpas {
 		assert.NotContains(t, deletedCheckpoints, vpa.Name)
 	}
+}
+
+func TestNewPodListerAndOOMObserverWithExternalSupport_ExternalOOM(t *testing.T) {
+	ctx := context.Background()
+	kubeClient := fake.NewSimpleClientset()
+	namespace := "test-namespace"
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+
+	// Setup a mock rest config
+	config := &rest.Config{
+		Host: "http://localhost:8080",
+	}
+
+	// Mock cluster state
+	clusterState := model.NewClusterState(time.Hour)
+
+	// Test with external OOM enabled
+	podLister, oomObserver, err := NewPodListerAndOOMObserverWithExternalSupport(
+		ctx, kubeClient, namespace, stopCh, config,
+		true, "dotnet_exceptions_total", "container", clusterState)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, podLister)
+	assert.NotNil(t, oomObserver)
+
+	// Verify it's an external OOM observer
+	_, ok := oomObserver.(*oom.ExternalOomObserver)
+	assert.True(t, ok, "Should return ExternalOomObserver when external OOM is enabled")
+
+	// Verify it implements the external checker interface
+	_, ok = oomObserver.(oom.ExternalOomChecker)
+	assert.True(t, ok, "Should implement ExternalOomChecker interface")
+}
+
+func TestNewPodListerAndOOMObserverWithExternalSupport_RegularOOM(t *testing.T) {
+	ctx := context.Background()
+	kubeClient := fake.NewSimpleClientset()
+	namespace := "test-namespace"
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+
+	config := &rest.Config{
+		Host: "http://localhost:8080",
+	}
+	clusterState := model.NewClusterState(time.Hour)
+
+	// Test with external OOM disabled
+	podLister, oomObserver, err := NewPodListerAndOOMObserverWithExternalSupport(
+		ctx, kubeClient, namespace, stopCh, config,
+		false, "", "container", clusterState)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, podLister)
+	assert.NotNil(t, oomObserver)
+
+	// Verify it's a regular OOM observer
+	_, ok := oomObserver.(*oom.ExternalOomObserver)
+	assert.False(t, ok, "Should not return ExternalOomObserver when external OOM is disabled")
+}
+
+func TestNewPodListerAndOOMObserverWithExternalSupport_NoExternalMetric(t *testing.T) {
+	ctx := context.Background()
+	kubeClient := fake.NewSimpleClientset()
+	namespace := "test-namespace"
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+
+	config := &rest.Config{
+		Host: "http://localhost:8080",
+	}
+	clusterState := model.NewClusterState(time.Hour)
+
+	// Test with external OOM enabled but no metric name
+	podLister, oomObserver, err := NewPodListerAndOOMObserverWithExternalSupport(
+		ctx, kubeClient, namespace, stopCh, config,
+		true, "", "container", clusterState)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, podLister)
+	assert.NotNil(t, oomObserver)
+
+	// Should fall back to regular observer
+	_, ok := oomObserver.(*oom.ExternalOomObserver)
+	assert.False(t, ok, "Should fall back to regular observer when no metric name provided")
+}
+
+func TestNewPodListerAndOOMObserverWithExternalSupport_InvalidConfig(t *testing.T) {
+	ctx := context.Background()
+	kubeClient := fake.NewSimpleClientset()
+	namespace := "test-namespace"
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+
+	// Invalid config that should cause external client creation to fail
+	config := &rest.Config{
+		Host: "invalid://localhost:99999",
+	}
+	clusterState := model.NewClusterState(time.Hour)
+
+	// Test with invalid config
+	podLister, oomObserver, err := NewPodListerAndOOMObserverWithExternalSupport(
+		ctx, kubeClient, namespace, stopCh, config,
+		true, "dotnet_exceptions_total", "container", clusterState)
+
+	// Should return error due to invalid config
+	assert.Error(t, err)
+	assert.Nil(t, podLister)
+	assert.Nil(t, oomObserver)
+	assert.Contains(t, err.Error(), "failed to create external OOM observer")
 }
