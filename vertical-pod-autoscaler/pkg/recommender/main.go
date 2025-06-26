@@ -46,6 +46,7 @@ import (
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input/history"
 	input_metrics "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input/metrics"
+	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input/oom"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/logic"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/model"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/routines"
@@ -92,6 +93,7 @@ var (
 	useExternalMetrics   = flag.Bool("use-external-metrics", false, "ALPHA.  Use an external metrics provider instead of metrics_server.")
 	externalCpuMetric    = flag.String("external-metrics-cpu-metric", "", "ALPHA.  Metric to use with external metrics provider for CPU usage.")
 	externalMemoryMetric = flag.String("external-metrics-memory-metric", "", "ALPHA.  Metric to use with external metrics provider for memory usage.")
+	externalOomMetric    = flag.String("external-metrics-oom-metric", "", "ALPHA.  Metric to use with external metrics provider for OOM detection (e.g., dotnet_exceptions_total{type=\"System.OutOfMemoryException\"}).")
 )
 
 // Aggregation configuration flags
@@ -231,7 +233,16 @@ func run(ctx context.Context, healthCheck *metrics.HealthCheck, commonFlag *comm
 	clusterState := model.NewClusterState(aggregateContainerStateGCInterval)
 	factory := informers.NewSharedInformerFactoryWithOptions(kubeClient, defaultResyncPeriod, informers.WithNamespace(commonFlag.VpaObjectNamespace))
 	controllerFetcher := controllerfetcher.NewControllerFetcher(config, kubeClient, factory, scaleCacheEntryFreshnessTime, scaleCacheEntryLifetime, scaleCacheEntryJitterFactor)
-	podLister, oomObserver := input.NewPodListerAndOOMObserver(ctx, kubeClient, commonFlag.VpaObjectNamespace, stopCh)
+
+	// Create OOM observer with external support if configured
+	useExternalOOM := *useExternalMetrics && *externalOomMetric != ""
+	podLister, oomObserver, err := input.NewPodListerAndOOMObserverWithExternalSupport(
+		ctx, kubeClient, commonFlag.VpaObjectNamespace, stopCh, config,
+		useExternalOOM, *externalOomMetric, *ctrNameLabel, clusterState)
+	if err != nil {
+		klog.ErrorS(err, "Failed to create OOM observer")
+		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
+	}
 
 	factory.Start(stopCh)
 	informerMap := factory.WaitForCacheSync(stopCh)
@@ -344,6 +355,16 @@ func run(ctx context.Context, healthCheck *metrics.HealthCheck, commonFlag *comm
 
 	ticker := time.Tick(*metricsFetcherInterval)
 	for range ticker {
+		// Check for external OOMs if using external OOM observer
+		if useExternalOOM {
+			if externalChecker, ok := oomObserver.(oom.ExternalOomChecker); ok {
+				if err := externalChecker.CheckForOOMs(ctx); err != nil {
+					klog.ErrorS(err, "Failed to check external OOMs")
+				}
+				externalChecker.CleanupOldContainers()
+			}
+		}
+
 		recommender.RunOnce()
 		healthCheck.UpdateLastActivity()
 	}

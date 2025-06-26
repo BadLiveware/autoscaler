@@ -45,6 +45,7 @@ import (
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/target"
 	controllerfetcher "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/target/controller_fetcher"
 	metrics_recommender "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/utils/metrics/recommender"
+	"k8s.io/client-go/rest"
 )
 
 const (
@@ -198,6 +199,34 @@ func NewPodListerAndOOMObserver(ctx context.Context, kubeClient kube_client.Inte
 	podLister := newPodClients(kubeClient, oomObserver, namespace, stopCh)
 	WatchEvictionEventsWithRetries(ctx, kubeClient, oomObserver, namespace)
 	return podLister, oomObserver
+}
+
+// NewPodListerAndOOMObserverWithExternalSupport creates pair of pod lister and OOM observer with optional external OOM support.
+func NewPodListerAndOOMObserverWithExternalSupport(ctx context.Context, kubeClient kube_client.Interface, namespace string, stopCh <-chan struct{}, config *rest.Config, useExternalOOM bool, externalOOMMetric string, containerNameLabel string, clusterState model.ClusterState) (v1lister.PodLister, oom.Observer, error) {
+	var oomObserver oom.Observer
+
+	if useExternalOOM && externalOOMMetric != "" {
+		// Use external OOM observer
+		extOOMObserver, extErr := oom.NewExternalObserver(config, externalOOMMetric, containerNameLabel, clusterState)
+		if extErr != nil {
+			return nil, nil, fmt.Errorf("failed to create external OOM observer: %v", extErr)
+		}
+		oomObserver = extOOMObserver
+		klog.V(1).InfoS("Using external OOM observer", "metric", externalOOMMetric, "containerLabel", containerNameLabel)
+	} else {
+		// Use regular OOM observer
+		oomObserver = oom.NewObserver()
+		klog.V(1).InfoS("Using regular OOM observer")
+	}
+
+	podLister := newPodClients(kubeClient, oomObserver, namespace, stopCh)
+
+	// Only watch eviction events for regular OOM observer
+	if !useExternalOOM || externalOOMMetric == "" {
+		WatchEvictionEventsWithRetries(ctx, kubeClient, oomObserver, namespace)
+	}
+
+	return podLister, oomObserver, nil
 }
 
 type clusterStateFeeder struct {
