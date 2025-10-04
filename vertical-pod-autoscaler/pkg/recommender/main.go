@@ -40,6 +40,7 @@ import (
 	resourceclient "k8s.io/metrics/pkg/client/clientset/versioned/typed/metrics/v1beta1"
 
 	"k8s.io/autoscaler/vertical-pod-autoscaler/common"
+	vpa_types "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1"
 	vpa_clientset "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/client/clientset/versioned"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/features"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/checkpoint"
@@ -290,11 +291,16 @@ func run(ctx context.Context, healthCheck *metrics.HealthCheck, commonFlag *comm
 
 	ignoredNamespaces := strings.Split(commonFlag.IgnoredVpaObjectNamespaces, ",")
 
+	telemetryDefaults := &vpa_types.TelemetryConfig{}
+
+	// Wrap the metrics source with telemetry-aware routing
+	telemetryAwareSource := input_metrics.NewTelemetryAwareSource(config, clusterState, source)
+
 	clusterStateFeeder := input.ClusterStateFeederFactory{
 		PodLister:           podLister,
 		OOMObserver:         oomObserver,
 		KubeClient:          kubeClient,
-		MetricsClient:       input_metrics.NewMetricsClient(source, commonFlag.VpaObjectNamespace, "default-metrics-client"),
+		MetricsClient:       input_metrics.NewMetricsClient(telemetryAwareSource, commonFlag.VpaObjectNamespace, "default-metrics-client"),
 		VpaCheckpointClient: vpa_clientset.NewForConfigOrDie(config).AutoscalingV1(),
 		VpaLister:           vpa_api_util.NewVpasLister(vpa_clientset.NewForConfigOrDie(config), make(chan struct{}), commonFlag.VpaObjectNamespace),
 		VpaCheckpointLister: vpa_api_util.NewVpaCheckpointLister(vpa_clientset.NewForConfigOrDie(config), make(chan struct{}), commonFlag.VpaObjectNamespace),
@@ -305,6 +311,7 @@ func run(ctx context.Context, healthCheck *metrics.HealthCheck, commonFlag *comm
 		RecommenderName:     *recommenderName,
 		IgnoredNamespaces:   ignoredNamespaces,
 		VpaObjectNamespace:  commonFlag.VpaObjectNamespace,
+		TelemetryDefaults:   telemetryDefaults,
 	}.Make()
 	controllerFetcher.Start(ctx, scaleCacheLoopPeriod)
 

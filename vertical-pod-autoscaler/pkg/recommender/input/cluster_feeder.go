@@ -91,6 +91,7 @@ type ClusterStateFeederFactory struct {
 	RecommenderName     string
 	IgnoredNamespaces   []string
 	VpaObjectNamespace  string
+	TelemetryDefaults   *vpa_types.TelemetryConfig
 }
 
 // Make creates new ClusterStateFeeder with internal data providers, based on kube client.
@@ -110,6 +111,8 @@ func (m ClusterStateFeederFactory) Make() *clusterStateFeeder {
 		recommenderName:     m.RecommenderName,
 		ignoredNamespaces:   m.IgnoredNamespaces,
 		vpaObjectNamespace:  m.VpaObjectNamespace,
+		telemetryDefaults:   m.TelemetryDefaults,
+		oomCounters:         make(map[model.ContainerID]uint64),
 	}
 }
 
@@ -217,6 +220,8 @@ type clusterStateFeeder struct {
 	recommenderName     string
 	ignoredNamespaces   []string
 	vpaObjectNamespace  string
+	telemetryDefaults   *vpa_types.TelemetryConfig
+	oomCounters         map[model.ContainerID]uint64 // Track previous OOM counter values
 }
 
 func (feeder *clusterStateFeeder) InitFromHistoryProvider(historyProvider history.HistoryProvider) {
@@ -438,7 +443,13 @@ func (feeder *clusterStateFeeder) LoadVPAs(ctx context.Context) {
 		selector, conditions := feeder.getSelector(ctx, vpaCRD)
 		klog.V(4).InfoS("Using selector", "selector", selector.String(), "vpa", klog.KObj(vpaCRD))
 
-		if feeder.clusterState.AddOrUpdateVpa(vpaCRD, selector) == nil {
+		// Validate telemetry configuration
+		telemetryCondition := feeder.validateTelemetryConfig(vpaCRD)
+		if telemetryCondition != nil {
+			conditions = append(conditions, *telemetryCondition)
+		}
+
+		if feeder.clusterState.AddOrUpdateVpa(vpaCRD, selector, feeder.telemetryDefaults) == nil {
 			// Successfully added VPA to the model.
 			vpaKeys[vpaID] = true
 
@@ -505,6 +516,7 @@ func (feeder *clusterStateFeeder) LoadRealTimeMetrics(ctx context.Context) {
 
 	sampleCount := 0
 	droppedSampleCount := 0
+	oomDeltasDetected := 0
 	for _, containerMetrics := range containersMetrics {
 		// Container metrics are fetched for all pods, however, not all pod states are tracked in memory saver mode.
 		if pod, exists := feeder.clusterState.Pods()[containerMetrics.ID.PodID]; exists && pod != nil {
@@ -514,6 +526,34 @@ func (feeder *clusterStateFeeder) LoadRealTimeMetrics(ctx context.Context) {
 				continue
 			}
 		}
+
+		// Process OOM counter deltas if present
+		if containerMetrics.OOMCount != nil {
+			newCount := *containerMetrics.OOMCount
+			oldCount, exists := feeder.oomCounters[containerMetrics.ID]
+			if exists && newCount > oldCount {
+				// OOM counter increased - record OOM events
+				delta := newCount - oldCount
+				klog.V(3).InfoS("OOM counter delta detected", "container", containerMetrics.ID, "oldCount", oldCount, "newCount", newCount, "delta", delta)
+
+				// Get current memory usage from the snapshot to estimate OOM memory level
+				memoryUsage := model.ResourceAmount(0)
+				if memUsage, ok := containerMetrics.Usage[model.ResourceMemory]; ok {
+					memoryUsage = memUsage
+				}
+
+				// Record OOM event(s) - use snapshot time as OOM timestamp
+				for range delta {
+					if err := feeder.clusterState.RecordOOM(containerMetrics.ID, containerMetrics.SnapshotTime, memoryUsage); err != nil {
+						klog.V(0).InfoS("Failed to record OOM from counter", "container", containerMetrics.ID, "error", err)
+					} else {
+						oomDeltasDetected++
+					}
+				}
+			}
+			feeder.oomCounters[containerMetrics.ID] = newCount
+		}
+
 		for _, sample := range newContainerUsageSamplesWithKey(containerMetrics) {
 			if err := feeder.clusterState.AddSample(sample); err != nil {
 				// Not all pod states are tracked in memory saver mode.
@@ -527,7 +567,7 @@ func (feeder *clusterStateFeeder) LoadRealTimeMetrics(ctx context.Context) {
 			}
 		}
 	}
-	klog.V(3).InfoS("ClusterSpec fed with ContainerUsageSamples", "sampleCount", sampleCount, "containerCount", len(containersMetrics), "droppedSampleCount", droppedSampleCount)
+	klog.V(3).InfoS("ClusterSpec fed with ContainerUsageSamples", "sampleCount", sampleCount, "containerCount", len(containersMetrics), "droppedSampleCount", droppedSampleCount, "oomDeltasDetected", oomDeltasDetected)
 Loop:
 	for {
 		select {
@@ -603,6 +643,25 @@ func (feeder *clusterStateFeeder) validateTargetRef(ctx context.Context, vpa *vp
 		return false, condition{conditionType: vpa_types.ConfigUnsupported, delete: false, message: fmt.Sprintf("The target %s has a parent controller but it should point to a topmost well-known or scalable controller", target)}
 	}
 	return true, condition{}
+}
+
+func (feeder *clusterStateFeeder) validateTelemetryConfig(vpa *vpa_types.VerticalPodAutoscaler) *condition {
+	if vpa.Spec.Telemetry == nil {
+		return nil
+	}
+
+	telemetry := vpa.Spec.Telemetry
+	if telemetry.Source == vpa_types.TelemetrySourcePrometheus {
+		if telemetry.Prometheus == nil || telemetry.Prometheus.Address == "" {
+			return &condition{
+				conditionType: vpa_types.ConfigUnsupported,
+				delete:        false,
+				message:       "Telemetry source set to Prometheus but prometheus.address is missing",
+			}
+		}
+	}
+
+	return nil
 }
 
 func (feeder *clusterStateFeeder) getSelector(ctx context.Context, vpa *vpa_types.VerticalPodAutoscaler) (labels.Selector, []condition) {

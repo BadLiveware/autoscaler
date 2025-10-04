@@ -49,7 +49,8 @@ type ClusterState interface {
 	AddOrUpdateContainer(containerID ContainerID, request Resources) error
 	AddSample(sample *ContainerUsageSampleWithKey) error
 	RecordOOM(containerID ContainerID, timestamp time.Time, requestedMemory ResourceAmount) error
-	AddOrUpdateVpa(apiObject *vpa_types.VerticalPodAutoscaler, selector labels.Selector) error
+	RecordOOMDelta(containerID ContainerID, timestamp time.Time) error
+	AddOrUpdateVpa(apiObject *vpa_types.VerticalPodAutoscaler, selector labels.Selector, telemetryDefaults *vpa_types.TelemetryConfig) error
 	DeleteVpa(vpaID VpaID) error
 	MakeAggregateStateKey(pod *PodState, containerName string) AggregateStateKey
 	RateLimitedGarbageCollectAggregateCollectionStates(ctx context.Context, now time.Time, controllerFetcher controllerfetcher.ControllerFetcher)
@@ -271,11 +272,26 @@ func (cluster *clusterState) RecordOOM(containerID ContainerID, timestamp time.T
 	return nil
 }
 
+// RecordOOMDelta records an OOM event without request context. The event is stored as metadata on the container state
+// to allow downstream components to react when the next metrics sample arrives.
+func (cluster *clusterState) RecordOOMDelta(containerID ContainerID, timestamp time.Time) error {
+	pod, podExists := cluster.pods[containerID.PodID]
+	if !podExists {
+		return NewKeyError(containerID.PodID)
+	}
+	containerState, containerExists := pod.Containers[containerID.ContainerName]
+	if !containerExists {
+		return NewKeyError(containerID.ContainerName)
+	}
+	containerState.RegisterOOMDelta(timestamp)
+	return nil
+}
+
 // AddOrUpdateVpa adds a new VPA with a given ID to the clusterState if it
 // didn't yet exist. If the VPA already existed but had a different pod
 // selector, the pod selector is updated. Updates the links between the VPA and
 // all aggregations it matches.
-func (cluster *clusterState) AddOrUpdateVpa(apiObject *vpa_types.VerticalPodAutoscaler, selector labels.Selector) error {
+func (cluster *clusterState) AddOrUpdateVpa(apiObject *vpa_types.VerticalPodAutoscaler, selector labels.Selector, telemetryDefaults *vpa_types.TelemetryConfig) error {
 	vpaID := VpaID{Namespace: apiObject.Namespace, VpaName: apiObject.Name}
 	annotationsMap := apiObject.Annotations
 	conditionsMap := make(vpaConditionsMap)
@@ -311,6 +327,7 @@ func (cluster *clusterState) AddOrUpdateVpa(apiObject *vpa_types.VerticalPodAuto
 	vpa.SetUpdateMode(apiObject.Spec.UpdatePolicy)
 	vpa.SetResourcePolicy(apiObject.Spec.ResourcePolicy)
 	vpa.SetAPIVersion(apiObject.GetObjectKind().GroupVersionKind().Version)
+	vpa.SetTelemetryConfig(apiObject.Spec.Telemetry, telemetryDefaults)
 	return nil
 }
 

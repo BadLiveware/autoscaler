@@ -111,6 +111,8 @@ type Vpa struct {
 	TargetRef *autoscaling.CrossVersionObjectReference
 	// PodCount contains number of live Pods matching a given VPA object.
 	PodCount int
+	// Telemetry defines how runtime signals are sourced for this VPA.
+	Telemetry *vpa_types.TelemetryConfig
 }
 
 // NewVpa returns a new Vpa with a given ID and pod selector. Doesn't set the
@@ -143,6 +145,38 @@ func (vpa *Vpa) SetAPIVersion(to string) {
 		return
 	}
 	vpa.APIVersion = to
+}
+
+// SetTelemetryConfig captures the telemetry configuration provided for this VPA.
+// If config is nil, defaults are applied.
+func (vpa *Vpa) SetTelemetryConfig(config *vpa_types.TelemetryConfig, defaults *vpa_types.TelemetryConfig) {
+	// Begin with defaults to ensure pointer is not reused across VPAs.
+	var telemetryCopy *vpa_types.TelemetryConfig
+	if defaults != nil {
+		telemetryCopy = defaults.DeepCopy()
+	}
+
+	if config != nil {
+		// Overlay user-provided config.
+		if telemetryCopy == nil {
+			telemetryCopy = &vpa_types.TelemetryConfig{}
+		}
+		userCopy := config.DeepCopy()
+		if userCopy.Source != "" {
+			telemetryCopy.Source = userCopy.Source
+		}
+		if userCopy.Prometheus != nil {
+			telemetryCopy.Prometheus = userCopy.Prometheus.DeepCopy()
+		} else if telemetryCopy.Source == vpa_types.TelemetrySourcePrometheus {
+			telemetryCopy.Prometheus = nil
+		}
+	}
+
+	if telemetryCopy != nil && telemetryCopy.Source == "" {
+		telemetryCopy.Source = vpa_types.TelemetrySourceAuto
+	}
+
+	vpa.Telemetry = telemetryCopy
 }
 
 // UseAggregationIfMatching checks if the given aggregation matches (contributes to) this VPA

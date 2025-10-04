@@ -39,6 +39,9 @@ type ContainerMetricsSnapshot struct {
 	SnapshotWindow time.Duration
 	// Actual usage of the resources over the measurement interval.
 	Usage model.Resources
+	// OOMCount contains the cumulative number of OOM events observed for the container, if available.
+	// When nil, the client did not report an OOM counter.
+	OOMCount *uint64
 }
 
 // MetricsClient provides simple metrics on resources usage on container level.
@@ -78,8 +81,22 @@ func (c *metricsClient) GetContainersMetrics(ctx context.Context) ([]*ContainerM
 		klog.V(3).InfoS("podMetrics retrieved", "namespace", c.namespace, "podMetrics", len(podMetricsList.Items))
 	}
 
+	// Check if source provides OOM counters
+	var oomCounters map[model.ContainerID]uint64
+	if telemetrySource, ok := c.source.(*TelemetryAwareSource); ok {
+		oomCounters = telemetrySource.GetOOMCounters()
+	}
+
 	for _, podMetrics := range podMetricsList.Items {
 		metricsSnapshotsForPod := createContainerMetricsSnapshots(podMetrics)
+		// Populate OOM counters if available
+		if len(oomCounters) > 0 {
+			for _, snapshot := range metricsSnapshotsForPod {
+				if count, exists := oomCounters[snapshot.ID]; exists {
+					snapshot.OOMCount = &count
+				}
+			}
+		}
 		metricsSnapshots = append(metricsSnapshots, metricsSnapshotsForPod...)
 	}
 	return metricsSnapshots, nil
@@ -107,6 +124,7 @@ func newContainerMetricsSnapshot(containerMetrics v1beta1.ContainerMetrics, podM
 		Usage:          usage,
 		SnapshotTime:   podMetrics.Timestamp.Time,
 		SnapshotWindow: podMetrics.Window.Duration,
+		OOMCount:       nil,
 	}
 }
 

@@ -203,6 +203,10 @@ func (container *ContainerState) RecordOOM(timestamp time.Time, requestedMemory 
 	return nil
 }
 
+// RegisterOOMDelta tracks an out-of-memory event reported without context. Currently a no-op until telemetry
+// sourced OOMs are fully supported.
+func (container *ContainerState) RegisterOOMDelta(timestamp time.Time) {}
+
 // AddSample adds a usage sample to the given ContainerState. Requires samples
 // for a single resource to be passed in chronological order (i.e. in order of
 // growing MeasureStart). Invalid samples (out of order or measure out of legal

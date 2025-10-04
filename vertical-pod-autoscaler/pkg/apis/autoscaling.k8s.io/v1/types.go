@@ -107,6 +107,11 @@ type VerticalPodAutoscalerSpec struct {
 	// recommendation) or contain exactly one recommender.
 	// +optional
 	Recommenders []*VerticalPodAutoscalerRecommenderSelector `json:"recommenders,omitempty" protobuf:"bytes,4,opt,name=recommenders"`
+
+	// Telemetry defines how the VPA should source runtime signals such as
+	// usage metrics and OOM events.
+	// +optional
+	Telemetry *TelemetryConfig `json:"telemetry,omitempty" protobuf:"bytes,5,opt,name=telemetry"`
 }
 
 // EvictionChangeRequirement refers to the relationship between the new target recommendation for a Pod and its current requests, what kind of change is necessary for the Pod to be evicted
@@ -433,4 +438,69 @@ type HistogramCheckpoint struct {
 
 	// Sum of samples to be used as denominator for weights from BucketWeights.
 	TotalWeight float64 `json:"totalWeight,omitempty" protobuf:"bytes,3,opt,name=totalWeight"`
+}
+
+// TelemetryConfig describes the external telemetry inputs used by the VPA.
+type TelemetryConfig struct {
+	// Source defines the underlying telemetry backend used for both resource
+	// usage metrics and OOM events.
+	Source TelemetrySource `json:"source" protobuf:"bytes,1,opt,name=source"`
+
+	// Prometheus configures a Prometheus-compatible backend when the source
+	// is set to TelemetrySourcePrometheus.
+	// +optional
+	Prometheus *PrometheusTelemetry `json:"prometheus,omitempty" protobuf:"bytes,2,opt,name=prometheus"`
+}
+
+// TelemetrySource enumerates supported telemetry providers.
+// +kubebuilder:validation:Enum=Auto;Kubernetes;Prometheus
+type TelemetrySource string
+
+const (
+	// TelemetrySourceAuto allows the recommender to pick the signal source using defaults.
+	TelemetrySourceAuto TelemetrySource = "Auto"
+	// TelemetrySourceKubernetes uses the in-cluster Kubernetes metrics (metrics-server API) and pod status events.
+	TelemetrySourceKubernetes TelemetrySource = "Kubernetes"
+	// TelemetrySourcePrometheus uses Prometheus queries for runtime metrics and OOM counters.
+	TelemetrySourcePrometheus TelemetrySource = "Prometheus"
+)
+
+// PrometheusTelemetry contains configuration for Prometheus-backed telemetry.
+type PrometheusTelemetry struct {
+	// Address is the base URL of the Prometheus API endpoint.
+	Address string `json:"address,omitempty" protobuf:"bytes,1,opt,name=address"`
+	// Query defines optional overrides for query strings used to collect metrics.
+	// +optional
+	Query *PrometheusTelemetryQuery `json:"query,omitempty" protobuf:"bytes,2,opt,name=query"`
+	// Authentication configures credentials used to access the Prometheus endpoint.
+	// +optional
+	Authentication *TelemetryAuth `json:"authentication,omitempty" protobuf:"bytes,3,opt,name=authentication"`
+	// Insecure skips TLS certificate verification when connecting to Prometheus over HTTPS.
+	// +optional
+	Insecure bool `json:"insecure,omitempty" protobuf:"varint,4,opt,name=insecure"`
+}
+
+// PrometheusTelemetryQuery exposes knobs for customizing metric query names.
+type PrometheusTelemetryQuery struct {
+	// CPUUsageQuery overrides the query used to fetch CPU usage samples.
+	// If empty, the recommender will use the component-level defaults.
+	CPUUsageQuery string `json:"cpuUsageQuery,omitempty" protobuf:"bytes,1,opt,name=cpuUsageQuery"`
+	// MemoryUsageQuery overrides the query used to fetch memory usage samples.
+	// If empty, the recommender will use the component-level defaults.
+	MemoryUsageQuery string `json:"memoryUsageQuery,omitempty" protobuf:"bytes,2,opt,name=memoryUsageQuery"`
+	// OOMCountQuery overrides the query used to discover OOM events via a counter.
+	// If empty, the recommender will use the component-level defaults.
+	OOMCountQuery string `json:"oomCountQuery,omitempty" protobuf:"bytes,3,opt,name=oomCountQuery"`
+}
+
+// TelemetryAuth holds optional authentication details for telemetry backends.
+type TelemetryAuth struct {
+	// BearerToken is the literal bearer token used for HTTP authentication.
+	BearerToken string `json:"bearerToken,omitempty" protobuf:"bytes,1,opt,name=bearerToken"`
+	// BearerTokenFile points to a file containing the bearer token to use.
+	BearerTokenFile string `json:"bearerTokenFile,omitempty" protobuf:"bytes,2,opt,name=bearerTokenFile"`
+	// BasicAuthUsername sets the username for HTTP basic authentication.
+	BasicAuthUsername string `json:"basicAuthUsername,omitempty" protobuf:"bytes,3,opt,name=basicAuthUsername"`
+	// BasicAuthPassword sets the password for HTTP basic authentication.
+	BasicAuthPassword string `json:"basicAuthPassword,omitempty" protobuf:"bytes,4,opt,name=basicAuthPassword"`
 }

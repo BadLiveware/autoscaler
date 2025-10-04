@@ -403,6 +403,74 @@ spec:
                 - name
                 type: object
                 x-kubernetes-map-type: atomic
+              telemetry:
+                description: |-
+                  Telemetry defines how the VPA should source runtime signals such as
+                  usage metrics and OOM events.
+                properties:
+                  prometheus:
+                    description: |-
+                      Prometheus configures a Prometheus-compatible backend when the source
+                      is set to TelemetrySourcePrometheus.
+                    properties:
+                      address:
+                        description: Address is the base URL of the Prometheus API
+                          endpoint.
+                        type: string
+                      authentication:
+                        description: Authentication configures credentials used to
+                          access the Prometheus endpoint.
+                        properties:
+                          basicAuthPassword:
+                            description: BasicAuthPassword sets the password for HTTP
+                              basic authentication.
+                            type: string
+                          basicAuthUsername:
+                            description: BasicAuthUsername sets the username for HTTP
+                              basic authentication.
+                            type: string
+                          bearerToken:
+                            description: BearerToken is the literal bearer token used
+                              for HTTP authentication.
+                            type: string
+                          bearerTokenFile:
+                            description: BearerTokenFile points to a file containing
+                              the bearer token to use.
+                            type: string
+                        type: object
+                      query:
+                        description: Query defines optional overrides for query strings
+                          used to collect metrics.
+                        properties:
+                          cpuUsageQuery:
+                            description: |-
+                              CPUUsageQuery overrides the query used to fetch CPU usage samples.
+                              If empty, the recommender will use the component-level defaults.
+                            type: string
+                          memoryUsageQuery:
+                            description: |-
+                              MemoryUsageQuery overrides the query used to fetch memory usage samples.
+                              If empty, the recommender will use the component-level defaults.
+                            type: string
+                          oomCountQuery:
+                            description: |-
+                              OOMCountQuery overrides the query used to discover OOM events via a counter.
+                              If empty, the recommender will use the component-level defaults.
+                            type: string
+                        type: object
+                    type: object
+                  source:
+                    description: |-
+                      Source defines the underlying telemetry backend used for both resource
+                      usage metrics and OOM events.
+                    enum:
+                    - Auto
+                    - Kubernetes
+                    - Prometheus
+                    type: string
+                required:
+                - source
+                type: object
               updatePolicy:
                 description: |-
                   Describes the rules on how changes are applied to the pods.

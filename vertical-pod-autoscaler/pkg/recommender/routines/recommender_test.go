@@ -85,7 +85,7 @@ func TestProcessUpdateVPAsConcurrency(t *testing.T) {
 
 	// Inject into clusterState
 	for _, vpa := range apiObjectVPAs {
-		err := r.clusterState.AddOrUpdateVpa(vpa, parsedSelector)
+		err := r.clusterState.AddOrUpdateVpa(vpa, parsedSelector, nil)
 		assert.NoError(t, err, "Failed to add or update VPA in cluster state")
 	}
 	r.clusterState.SetObservedVPAs(apiObjectVPAs)

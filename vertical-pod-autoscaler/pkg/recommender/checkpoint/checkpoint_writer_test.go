@@ -69,7 +69,7 @@ func addVpa(t *testing.T, cluster model.ClusterState, vpaID model.VpaID, selecto
 	apiObject.Name = vpaID.VpaName
 	labelSelector, _ := metav1.ParseToLabelSelector(selector)
 	parsedSelector, _ := metav1.LabelSelectorAsSelector(labelSelector)
-	err := cluster.AddOrUpdateVpa(&apiObject, parsedSelector)
+	err := cluster.AddOrUpdateVpa(&apiObject, parsedSelector, nil)
 	if err != nil {
 		t.Fatalf("AddOrUpdateVpa() failed: %v", err)
 	}
@@ -204,7 +204,7 @@ func TestStoreCheckpointsMakesProgressEvenForCancelledContext(t *testing.T) {
 		}
 		labelSelector, _ := labels.Parse(fmt.Sprintf("app=pod-%d", i))
 		vpa := vpaBuilder.WithName(fmt.Sprintf("vpa-%d", i)).WithTargetRef(targetRef).Get()
-		err := clusterState.AddOrUpdateVpa(vpa, labelSelector)
+		err := clusterState.AddOrUpdateVpa(vpa, labelSelector, nil)
 		assert.NoError(t, err)
 	}
 
