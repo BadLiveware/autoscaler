@@ -40,7 +40,8 @@ import (
 )
 
 const (
-	recommenderComponent = "recommender"
+	recommenderComponent           = "recommender"
+	recommenderPrometheusComponent = "recommender-prometheus"
 
 	// RecommenderDeploymentName is VPA recommender deployment name
 	RecommenderDeploymentName = "vpa-recommender"
@@ -80,6 +81,11 @@ func SIGDescribe(scenario, name string, args ...interface{}) bool {
 // RecommenderE2eDescribe describes a VPA recommender e2e test.
 func RecommenderE2eDescribe(name string, args ...interface{}) bool {
 	return SIGDescribe(recommenderComponent, name, args...)
+}
+
+// RecommenderPrometheusE2eDescribe describes a VPA recommender Prometheus integration e2e test.
+func RecommenderPrometheusE2eDescribe(name string, args ...interface{}) bool {
+	return SIGDescribe(recommenderPrometheusComponent, name, args...)
 }
 
 // GetHamsterContainerNameByIndex returns name of i-th hamster container.

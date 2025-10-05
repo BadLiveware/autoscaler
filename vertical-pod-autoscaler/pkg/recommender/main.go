@@ -28,9 +28,13 @@ import (
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/informers"
 	kube_client "k8s.io/client-go/kubernetes"
+	v1lister "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	kube_flag "k8s.io/component-base/cli/flag"
@@ -46,6 +50,7 @@ import (
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input/history"
 	input_metrics "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input/metrics"
+	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input/oom"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/logic"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/model"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/routines"
@@ -95,6 +100,26 @@ var (
 	useExternalMetrics   = flag.Bool("use-external-metrics", false, "ALPHA.  Use an external metrics provider instead of metrics_server.")
 	externalCpuMetric    = flag.String("external-metrics-cpu-metric", "", "ALPHA.  Metric to use with external metrics provider for CPU usage.")
 	externalMemoryMetric = flag.String("external-metrics-memory-metric", "", "ALPHA.  Metric to use with external metrics provider for memory usage.")
+)
+
+// Prometheus metrics source flags
+var (
+	usePrometheusSource         = flag.Bool("use-prometheus-source", false, "Use Prometheus as direct metrics source instead of metrics-server or external-metrics API. Allows coexistence with KEDA.")
+	prometheusSourceAddress     = flag.String("prometheus-source-address", "", "Prometheus address for direct metrics queries. Uses --prometheus-address if not specified.")
+	prometheusSourceInsecure    = flag.Bool("prometheus-source-insecure", false, "Skip TLS verification for Prometheus metrics source.")
+	prometheusSourceTimeout     = flag.String("prometheus-source-timeout", "30s", "Query timeout for Prometheus metrics source.")
+	prometheusSourceBearerToken = flag.String("prometheus-source-bearer-token", "", "Bearer token for Prometheus metrics source authentication.")
+	prometheusSourceUsername    = flag.String("prometheus-source-username", "", "Username for Prometheus metrics source basic auth.")
+	prometheusSourcePassword    = flag.String("prometheus-source-password", "", "Password for Prometheus metrics source basic auth.")
+	prometheusCPUQuery          = flag.String("prometheus-cpu-query", "", "Custom PromQL query for CPU usage. Use %s placeholders for namespace and pod regex.")
+	prometheusMemoryQuery       = flag.String("prometheus-memory-query", "", "Custom PromQL query for memory usage. Use %s placeholders for namespace and pod regex.")
+	prometheusOOMQuery          = flag.String("prometheus-oom-query", "", "Custom PromQL query for OOM counter. Use %s placeholders for namespace and pod regex. Enables managed language OOM support.")
+)
+
+// External OOM observer flags
+var (
+	useExternalOOMObserver = flag.Bool("use-external-oom-observer", false, "Use external metrics for OOM detection instead of Kubernetes OOMKilled events. Enables managed language (.NET, Java) OOM support.")
+	oomPollingInterval     = flag.Duration("oom-polling-interval", 60*time.Second, "How often to poll external metrics for OOM counter changes.")
 )
 
 // Aggregation configuration flags
@@ -248,7 +273,18 @@ func run(ctx context.Context, healthCheck *metrics.HealthCheck, commonFlag *comm
 	clusterState := model.NewClusterState(aggregateContainerStateGCInterval)
 	factory := informers.NewSharedInformerFactoryWithOptions(kubeClient, defaultResyncPeriod, informers.WithNamespace(commonFlag.VpaObjectNamespace))
 	controllerFetcher := controllerfetcher.NewControllerFetcher(config, kubeClient, factory, scaleCacheEntryFreshnessTime, scaleCacheEntryLifetime, scaleCacheEntryJitterFactor)
-	podLister, oomObserver := input.NewPodListerAndOOMObserver(ctx, kubeClient, commonFlag.VpaObjectNamespace, stopCh)
+
+	var oomObserver oom.Observer
+	var podLister v1lister.PodLister
+
+	if *useExternalOOMObserver {
+		klog.V(1).InfoS("Using external OOM observer", "pollingInterval", *oomPollingInterval)
+		// Create pod lister without OOM observer (we'll create external observer later)
+		podLister = newPodLister(kubeClient, commonFlag.VpaObjectNamespace, stopCh)
+	} else {
+		klog.V(1).InfoS("Using Kubernetes native OOM observer")
+		podLister, oomObserver = input.NewPodListerAndOOMObserver(ctx, kubeClient, commonFlag.VpaObjectNamespace, stopCh)
+	}
 
 	factory.Start(stopCh)
 	informerMap := factory.WaitForCacheSync(stopCh)
@@ -271,8 +307,17 @@ func run(ctx context.Context, healthCheck *metrics.HealthCheck, commonFlag *comm
 	globalMaxAllowed := initGlobalMaxAllowed()
 	// CappingPostProcessor, should always come in the last position for post-processing
 	postProcessors = append(postProcessors, routines.NewCappingRecommendationProcessor(globalMaxAllowed))
+
 	var source input_metrics.PodMetricsLister
-	if *useExternalMetrics {
+	if *usePrometheusSource {
+		klog.V(1).InfoS("Using Prometheus as direct metrics source")
+		source = createPrometheusSource(config, clusterState)
+
+		// If using Prometheus source and external OOM observer is enabled, create it
+		if *useExternalOOMObserver {
+			oomObserver = createExternalOOMObserver(source, clusterState, stopCh)
+		}
+	} else if *useExternalMetrics {
 		resourceMetrics := map[apiv1.ResourceName]string{}
 		if externalCpuMetric != nil && *externalCpuMetric != "" {
 			resourceMetrics[apiv1.ResourceCPU] = *externalCpuMetric
@@ -286,6 +331,12 @@ func run(ctx context.Context, healthCheck *metrics.HealthCheck, commonFlag *comm
 	} else {
 		klog.V(1).InfoS("Using Metrics Server")
 		source = input_metrics.NewPodMetricsesSource(resourceclient.NewForConfigOrDie(config))
+	}
+
+	// Validate that oomObserver is set
+	if oomObserver == nil {
+		klog.ErrorS(nil, "OOM observer not initialized")
+		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
 	}
 
 	ignoredNamespaces := strings.Split(commonFlag.IgnoredVpaObjectNamespaces, ",")
@@ -379,4 +430,103 @@ func initGlobalMaxAllowed() apiv1.ResourceList {
 	}
 
 	return result
+}
+
+func createPrometheusSource(config *rest.Config, clusterState model.ClusterState) input_metrics.PodMetricsLister {
+	// Use prometheus-source-address if provided, otherwise fall back to prometheus-address
+	address := *prometheusSourceAddress
+	if address == "" {
+		address = *prometheusAddress
+	}
+
+	timeout, err := time.ParseDuration(*prometheusSourceTimeout)
+	if err != nil {
+		klog.ErrorS(err, "Could not parse --prometheus-source-timeout as a time.Duration")
+		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
+	}
+
+	var auth *input_metrics.PrometheusAuth
+	if *prometheusSourceBearerToken != "" || (*prometheusSourceUsername != "" && *prometheusSourcePassword != "") {
+		auth = &input_metrics.PrometheusAuth{
+			BearerToken:       *prometheusSourceBearerToken,
+			BasicAuthUsername: *prometheusSourceUsername,
+			BasicAuthPassword: *prometheusSourcePassword,
+		}
+	}
+
+	sourceConfig := input_metrics.PrometheusSourceConfig{
+		Address:            address,
+		ClusterState:       clusterState,
+		Auth:               auth,
+		InsecureSkipVerify: *prometheusSourceInsecure,
+		QueryTimeout:       timeout,
+		CPUQuery:           *prometheusCPUQuery,
+		MemoryQuery:        *prometheusMemoryQuery,
+		OOMQuery:           *prometheusOOMQuery,
+	}
+
+	source, err := input_metrics.NewPrometheusMetricsSource(sourceConfig)
+	if err != nil {
+		klog.ErrorS(err, "Failed to create Prometheus metrics source")
+		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
+	}
+
+	klog.V(1).InfoS("Created Prometheus metrics source",
+		"address", address,
+		"timeout", timeout,
+		"hasAuth", auth != nil,
+		"hasCustomCPUQuery", *prometheusCPUQuery != "",
+		"hasCustomMemoryQuery", *prometheusMemoryQuery != "",
+		"hasCustomOOMQuery", *prometheusOOMQuery != "")
+
+	return source
+}
+
+func createExternalOOMObserver(source input_metrics.PodMetricsLister, clusterState model.ClusterState, stopCh <-chan struct{}) oom.Observer {
+	// Check if source implements GetOOMCounters
+	oomCounterSource, ok := source.(interface {
+		GetOOMCounters() map[model.ContainerID]uint64
+	})
+	if !ok {
+		klog.ErrorS(nil, "Metrics source does not support GetOOMCounters(). Cannot create external OOM observer.")
+		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
+	}
+
+	observer := oom.NewExternalObserver(oom.ExternalObserverConfig{
+		MetricsSource:   oomCounterSource,
+		ClusterState:    clusterState,
+		PollingInterval: *oomPollingInterval,
+		StopChannel:     stopCh,
+	})
+
+	klog.V(1).InfoS("Created external OOM observer",
+		"pollingInterval", *oomPollingInterval)
+
+	return observer
+}
+
+func newPodLister(kubeClient kube_client.Interface, namespace string, stopCh <-chan struct{}) v1lister.PodLister {
+	// Create pod lister without OOM observer
+	selector := fields.ParseSelectorOrDie("status.phase!=" + string(apiv1.PodPending))
+	podListWatch := cache.NewListWatchFromClient(kubeClient.CoreV1().RESTClient(), "pods", namespace, selector)
+	informerOptions := cache.InformerOptions{
+		ObjectType:    &apiv1.Pod{},
+		ListerWatcher: podListWatch,
+		Handler:       cache.ResourceEventHandlerFuncs{}, // No handler
+		ResyncPeriod:  time.Hour,
+		Indexers:      cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
+	}
+
+	store, controller := cache.NewInformerWithOptions(informerOptions)
+	indexer, ok := store.(cache.Indexer)
+	if !ok {
+		klog.ErrorS(nil, "Expected Indexer, but got a Store that does not implement Indexer")
+		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
+	}
+	podLister := v1lister.NewPodLister(indexer)
+	go controller.Run(stopCh)
+	if !cache.WaitForCacheSync(stopCh, controller.HasSynced) {
+		klog.ErrorS(nil, "Failed to sync Pod cache during initialization")
+	}
+	return podLister
 }

@@ -1,0 +1,46 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vpa-recommender
+  namespace: kube-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vpa-recommender
+  template:
+    metadata:
+      labels:
+        app: vpa-recommender
+    spec:
+      serviceAccountName: vpa-recommender
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534 # nobody
+      containers:
+      - name: recommender
+        image: localhost:5001/vpa-recommender:latest
+        imagePullPolicy: Never
+        args:
+          - /recommender
+          - --use-prometheus-source=true
+          - --prometheus-source-address=http://prometheus.monitoring.svc:9090
+          - --use-external-oom-observer=true
+          - --prometheus-oom-query=e2e_test_oom_events_total{namespace=~"%s", pod=~"%s"}
+          - --oom-polling-interval=10s
+          - --recommender-interval=10s
+          - --pod-recommendation-min-memory-mb=10
+          - --v=4
+        resources:
+          limits:
+            cpu: 200m
+            memory: 1000Mi
+          requests:
+            cpu: 50m
+            memory: 500Mi
+        ports:
+        - name: prometheus
+          containerPort: 8942
+        - name: delve
+          containerPort: 40000

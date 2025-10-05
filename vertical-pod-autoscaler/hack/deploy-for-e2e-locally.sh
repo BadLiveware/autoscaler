@@ -29,6 +29,7 @@ function print_help {
   echo "<suite> should be one of:"
   echo " - recommender"
   echo " - recommender-externalmetrics"
+  echo " - recommender-prometheus"
   echo " - updater"
   echo " - admission-controller"
   echo " - actuation"
@@ -48,7 +49,7 @@ fi
 SUITE=$1
 
 case ${SUITE} in
-  recommender|recommender-externalmetrics|updater|admission-controller)
+  recommender|recommender-externalmetrics|recommender-prometheus|updater|admission-controller)
     COMPONENTS="${SUITE}"
     ;;
   full-vpa)
@@ -75,7 +76,7 @@ kubectl apply -f ${SCRIPT_ROOT}/deploy/vpa-v1-crd-gen.yaml
 kubectl apply -f ${SCRIPT_ROOT}/hack/e2e/k8s-metrics-server.yaml
 
 for i in ${COMPONENTS}; do
-  if [ $i == recommender-externalmetrics ] ; then
+  if [ $i == recommender-externalmetrics ] || [ $i == recommender-prometheus ] ; then
     i=recommender
   fi
   if [ $i == admission-controller ] ; then
@@ -94,6 +95,11 @@ for i in ${COMPONENTS}; do
      kubectl apply -f ${SCRIPT_ROOT}/hack/e2e/prometheus.yaml
      kubectl apply -f ${SCRIPT_ROOT}/hack/e2e/prometheus-adapter.yaml
      kubectl apply -f ${SCRIPT_ROOT}/hack/e2e/metrics-pump.yaml
+     kubectl apply -f ${SCRIPT_ROOT}/hack/e2e/${i}-deployment.yaml
+  elif [ $i == recommender-prometheus ] ; then
+     kubectl delete namespace monitoring --ignore-not-found=true
+     kubectl create namespace monitoring
+     kubectl apply -f ${SCRIPT_ROOT}/hack/e2e/prometheus-stack.yaml
      kubectl apply -f ${SCRIPT_ROOT}/hack/e2e/${i}-deployment.yaml
   else
     REGISTRY=${REGISTRY} TAG=${TAG} ${SCRIPT_ROOT}/hack/vpa-process-yaml.sh ${SCRIPT_ROOT}/deploy/${i}-deployment.yaml | kubectl apply -f -

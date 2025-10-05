@@ -25,6 +25,7 @@ function print_help {
   echo "<suite> should be one of:"
   echo " - recommender"
   echo " - recommender-externalmetrics"
+  echo " - recommender-prometheus"
   echo " - updater"
   echo " - admission-controller"
   echo " - actuation"
@@ -88,7 +89,7 @@ kind load docker-image localhost:5001/write-metrics:dev
 
 
 case ${SUITE} in
-  recommender|recommender-externalmetrics|updater|admission-controller|actuation|full-vpa)
+  recommender|recommender-externalmetrics|recommender-prometheus|updater|admission-controller|actuation|full-vpa)
     ${SCRIPT_ROOT}/hack/vpa-down.sh
     echo " ** Deploying for suite ${SUITE}"
     ${SCRIPT_ROOT}/hack/deploy-for-e2e-locally.sh ${SUITE}
