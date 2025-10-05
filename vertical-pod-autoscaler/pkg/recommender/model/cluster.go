@@ -49,7 +49,6 @@ type ClusterState interface {
 	AddOrUpdateContainer(containerID ContainerID, request Resources) error
 	AddSample(sample *ContainerUsageSampleWithKey) error
 	RecordOOM(containerID ContainerID, timestamp time.Time, requestedMemory ResourceAmount) error
-	RecordOOMDelta(containerID ContainerID, timestamp time.Time) error
 	AddOrUpdateVpa(apiObject *vpa_types.VerticalPodAutoscaler, selector labels.Selector, telemetryDefaults *vpa_types.TelemetryConfig) error
 	DeleteVpa(vpaID VpaID) error
 	MakeAggregateStateKey(pod *PodState, containerName string) AggregateStateKey
@@ -269,21 +268,6 @@ func (cluster *clusterState) RecordOOM(containerID ContainerID, timestamp time.T
 	if err != nil {
 		return fmt.Errorf("error while recording OOM for %v, Reason: %v", containerID, err)
 	}
-	return nil
-}
-
-// RecordOOMDelta records an OOM event without request context. The event is stored as metadata on the container state
-// to allow downstream components to react when the next metrics sample arrives.
-func (cluster *clusterState) RecordOOMDelta(containerID ContainerID, timestamp time.Time) error {
-	pod, podExists := cluster.pods[containerID.PodID]
-	if !podExists {
-		return NewKeyError(containerID.PodID)
-	}
-	containerState, containerExists := pod.Containers[containerID.ContainerName]
-	if !containerExists {
-		return NewKeyError(containerID.ContainerName)
-	}
-	containerState.RegisterOOMDelta(timestamp)
 	return nil
 }
 
