@@ -228,15 +228,15 @@ func (t *TelemetryAwareSource) fetchPrometheusMetrics(ctx context.Context, addre
 	allOOMCounters := make(map[model.ContainerID]uint64)
 	now := time.Now()
 
-	// Check if user provided custom queries
-	useCustomQueries := queryConfig != nil && (queryConfig.CPUUsageQuery != "" || queryConfig.MemoryUsageQuery != "" || queryConfig.OOMCountQuery != "")
+	// Check if ALL queries are custom (for unfiltered mode)
+	cpuQuery := t.getCPUQuery(queryConfig, vpas)
+	memoryQuery := t.getMemoryQuery(queryConfig, vpas)
+	oomQuery := t.getOOMCounterQuery(queryConfig, vpas)
 
-	if useCustomQueries {
-		// User-provided queries: use as-is without pod filtering
-		cpuQuery := t.getCPUQuery(queryConfig, vpas)
-		memoryQuery := t.getMemoryQuery(queryConfig, vpas)
-		oomQuery := t.getOOMCounterQuery(queryConfig, vpas)
+	useFullCustomQueries := cpuQuery != "" && memoryQuery != ""
 
+	if useFullCustomQueries {
+		// All required queries are custom: use as-is without pod filtering
 		cpuMetrics, err := t.queryPrometheus(ctx, client, cpuQuery, now)
 		if err != nil {
 			klog.ErrorS(err, "Failed to query CPU metrics from Prometheus", "address", address)
@@ -262,9 +262,9 @@ func (t *TelemetryAwareSource) fetchPrometheusMetrics(ctx context.Context, addre
 			result.Items = append(result.Items, podMetrics)
 		}
 	} else {
-		// Default queries: optimize by querying per-VPA with pod selectors
+		// Use per-VPA queries (optimized with pod selectors, supports partial custom queries)
 		for _, vpa := range vpas {
-			vpaMetrics, vpaOOMCounters, err := t.fetchPrometheusMetricsForVPA(ctx, client, vpa, now)
+			vpaMetrics, vpaOOMCounters, err := t.fetchPrometheusMetricsForVPA(ctx, client, vpa, now, queryConfig)
 			if err != nil {
 				klog.ErrorS(err, "Failed to fetch Prometheus metrics for VPA", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName))
 				continue
@@ -309,7 +309,7 @@ func (t *TelemetryAwareSource) getOOMCounterQuery(queryConfig *vpa_types.Prometh
 	return ""
 }
 
-func (t *TelemetryAwareSource) fetchPrometheusMetricsForVPA(ctx context.Context, client prometheusv1.API, vpa *model.Vpa, timestamp time.Time) (*v1beta1.PodMetricsList, map[model.ContainerID]uint64, error) {
+func (t *TelemetryAwareSource) fetchPrometheusMetricsForVPA(ctx context.Context, client prometheusv1.API, vpa *model.Vpa, timestamp time.Time, queryConfig *vpa_types.PrometheusTelemetryQuery) (*v1beta1.PodMetricsList, map[model.ContainerID]uint64, error) {
 	result := &v1beta1.PodMetricsList{}
 	allOOMCounters := make(map[model.ContainerID]uint64)
 
@@ -330,10 +330,26 @@ func (t *TelemetryAwareSource) fetchPrometheusMetricsForVPA(ctx context.Context,
 
 	namespace := vpa.ID.Namespace
 
-	// Build optimized queries for this VPA's pods
-	cpuQuery := fmt.Sprintf(defaultCPUQueryTemplate, namespace, podNames)
-	memoryQuery := fmt.Sprintf(defaultMemoryQueryTemplate, namespace, podNames)
-	oomQuery := fmt.Sprintf(defaultOOMQueryTemplate, namespace, podNames)
+	// Build optimized queries for this VPA's pods (use custom queries if provided)
+	var cpuQuery, memoryQuery, oomQuery string
+
+	if queryConfig != nil && queryConfig.CPUUsageQuery != "" {
+		cpuQuery = queryConfig.CPUUsageQuery
+	} else {
+		cpuQuery = fmt.Sprintf(defaultCPUQueryTemplate, namespace, podNames)
+	}
+
+	if queryConfig != nil && queryConfig.MemoryUsageQuery != "" {
+		memoryQuery = queryConfig.MemoryUsageQuery
+	} else {
+		memoryQuery = fmt.Sprintf(defaultMemoryQueryTemplate, namespace, podNames)
+	}
+
+	if queryConfig != nil && queryConfig.OOMCountQuery != "" {
+		oomQuery = queryConfig.OOMCountQuery
+	} else {
+		oomQuery = fmt.Sprintf(defaultOOMQueryTemplate, namespace, podNames)
+	}
 
 	cpuMetrics, err := t.queryPrometheus(ctx, client, cpuQuery, timestamp)
 	if err != nil {
@@ -347,8 +363,9 @@ func (t *TelemetryAwareSource) fetchPrometheusMetricsForVPA(ctx context.Context,
 
 	oomCounters, err := t.queryOOMCounters(ctx, client, oomQuery, timestamp)
 	if err != nil {
-		klog.V(4).InfoS("Failed to query OOM counters", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName), "error", err)
+		klog.ErrorS(err, "Failed to query OOM counters", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName), "query", oomQuery)
 	} else {
+		klog.V(4).InfoS("Successfully queried OOM counters", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName), "query", oomQuery, "count", len(oomCounters))
 		maps.Copy(allOOMCounters, oomCounters)
 	}
 

@@ -33,6 +33,7 @@ function print_help {
   echo " - admission-controller"
   echo " - actuation"
   echo " - full-vpa"
+  echo " - prometheus-telemetry"
 }
 
 if [ $# -eq 0 ]; then
@@ -51,7 +52,7 @@ case ${SUITE} in
   recommender|recommender-externalmetrics|updater|admission-controller)
     COMPONENTS="${SUITE}"
     ;;
-  full-vpa)
+  full-vpa|prometheus-telemetry)
     COMPONENTS="recommender updater admission-controller"
     ;;
   actuation)
@@ -73,6 +74,16 @@ kubectl apply -f ${SCRIPT_ROOT}/hack/e2e/vpa-rbac.yaml
 # Other-versioned CRDs are irrelevant as we're running a modern-ish cluster.
 kubectl apply -f ${SCRIPT_ROOT}/deploy/vpa-v1-crd-gen.yaml
 kubectl apply -f ${SCRIPT_ROOT}/hack/e2e/k8s-metrics-server.yaml
+
+# Deploy Prometheus if DEPLOY_PROMETHEUS is set (needed for telemetry E2E tests)
+if [ "${DEPLOY_PROMETHEUS:-false}" == "true" ]; then
+  echo "Deploying Prometheus and Pushgateway for telemetry tests..."
+  kubectl apply -f ${SCRIPT_ROOT}/deploy/prometheus-test-deployment.yaml
+  echo "Waiting for Prometheus to be ready..."
+  kubectl wait --for=condition=available --timeout=120s deployment/prometheus -n monitoring || true
+  echo "Waiting for Pushgateway to be ready..."
+  kubectl wait --for=condition=available --timeout=60s deployment/pushgateway -n monitoring || true
+fi
 
 for i in ${COMPONENTS}; do
   if [ $i == recommender-externalmetrics ] ; then

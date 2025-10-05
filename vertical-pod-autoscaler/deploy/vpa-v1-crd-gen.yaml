@@ -438,6 +438,10 @@ spec:
                               the bearer token to use.
                             type: string
                         type: object
+                      insecure:
+                        description: Insecure skips TLS certificate verification when
+                          connecting to Prometheus over HTTPS.
+                        type: boolean
                       query:
                         description: Query defines optional overrides for query strings
                           used to collect metrics.

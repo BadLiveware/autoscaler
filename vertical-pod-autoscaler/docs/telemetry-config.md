@@ -1,8 +1,15 @@
 # VPA Telemetry Configuration
 
-## Overview
+## Reference
 
-The VPA recommender can source runtime metrics and OOM events from either Kubernetes (metrics-server) or Prometheus. This is configurable per-VPA via the `spec.telemetry` field.
+### Telemetry Sources
+
+The VPA recommender sources runtime metrics and OOM events from configurable backends. Each VPA specifies its telemetry source via the `spec.telemetry` field.
+
+**Available sources:**
+- `Kubernetes`: Uses Kubernetes metrics-server API (default behavior)
+- `Prometheus`: Queries Prometheus for metrics and OOM counters
+- `Auto`: Delegates to global defaults (equivalent to Kubernetes)
 
 ## Configuration Precedence
 
@@ -66,7 +73,10 @@ spec:
         oomCountQuery: "my_oom_counter{app='myapp'}"
 ```
 
-**Note:** Custom queries bypass automatic pod filtering; user controls scope entirely.
+**Behavior:** 
+- Custom queries bypass automatic pod filtering. The query defines the complete scope.
+- **Partial overrides:** When CPU or memory queries are provided without `oomCountQuery`, OOM counter fetching is disabled. The system falls back to Kubernetes `OOMKilled` status detection from pod events.
+- **Disabling OOM counters:** Omit the `oomCountQuery` field to disable OOM counter queries while using custom CPU/memory queries.
 
 ## OOM Event Handling
 
@@ -79,9 +89,9 @@ spec:
 - When Prometheus doesn't provide OOM counters, system uses pod status `OOMKilled` detection
 - Both mechanisms can coexist (Prometheus counters + Kubernetes events)
 
-## Examples
+## How to Configure Telemetry
 
-### Kubernetes Metrics (Default)
+### Configure VPA to Use Kubernetes Metrics-Server
 ```yaml
 apiVersion: autoscaling.k8s.io/v1
 kind: VerticalPodAutoscaler
@@ -92,10 +102,10 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: my-app
-  # No telemetry config - uses Kubernetes metrics-server
+  # Omit telemetry field to use Kubernetes metrics-server
 ```
 
-### Prometheus with Authentication
+### Configure VPA to Use Prometheus with Bearer Token
 ```yaml
 apiVersion: autoscaling.k8s.io/v1
 kind: VerticalPodAutoscaler
@@ -115,7 +125,7 @@ spec:
         bearerToken: "my-secret-token"
 ```
 
-### Prometheus with Basic Auth
+### Configure VPA to Use Prometheus with Basic Authentication
 ```yaml
 apiVersion: autoscaling.k8s.io/v1
 kind: VerticalPodAutoscaler

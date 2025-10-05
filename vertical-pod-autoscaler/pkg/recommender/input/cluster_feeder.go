@@ -531,25 +531,52 @@ func (feeder *clusterStateFeeder) LoadRealTimeMetrics(ctx context.Context) {
 		if containerMetrics.OOMCount != nil {
 			newCount := *containerMetrics.OOMCount
 			oldCount, exists := feeder.oomCounters[containerMetrics.ID]
+
+			// Always log OOM counter processing for debugging
+			klog.InfoS("Processing OOM counter",
+				"container", containerMetrics.ID,
+				"newCount", newCount,
+				"oldCount", oldCount,
+				"hadPrevious", exists)
+
 			if exists && newCount > oldCount {
 				// OOM counter increased - record OOM events
 				delta := newCount - oldCount
-				klog.V(3).InfoS("OOM counter delta detected", "container", containerMetrics.ID, "oldCount", oldCount, "newCount", newCount, "delta", delta)
+				klog.InfoS("OOM counter delta detected - recording OOM events",
+					"container", containerMetrics.ID,
+					"oldCount", oldCount,
+					"newCount", newCount,
+					"delta", delta)
 
-				// Get current memory usage from the snapshot to estimate OOM memory level
-				memoryUsage := model.ResourceAmount(0)
-				if memUsage, ok := containerMetrics.Usage[model.ResourceMemory]; ok {
-					memoryUsage = memUsage
+				// Get container's memory request from the pod spec (not current usage!)
+				// This matches the behavior of the existing OOM observer
+				memoryRequest := model.ResourceAmount(0)
+				if containerState := feeder.clusterState.GetContainer(containerMetrics.ID); containerState != nil {
+					if memReq, ok := containerState.Request[model.ResourceMemory]; ok {
+						memoryRequest = memReq
+					}
 				}
+
+				klog.InfoS("Recording OOM with memory request",
+					"container", containerMetrics.ID,
+					"memoryRequest", memoryRequest)
 
 				// Record OOM event(s) - use snapshot time as OOM timestamp
 				for range delta {
-					if err := feeder.clusterState.RecordOOM(containerMetrics.ID, containerMetrics.SnapshotTime, memoryUsage); err != nil {
+					if err := feeder.clusterState.RecordOOM(containerMetrics.ID, containerMetrics.SnapshotTime, memoryRequest); err != nil {
 						klog.V(0).InfoS("Failed to record OOM from counter", "container", containerMetrics.ID, "error", err)
 					} else {
 						oomDeltasDetected++
 					}
 				}
+			} else if !exists {
+				klog.InfoS("First OOM counter observation - establishing baseline",
+					"container", containerMetrics.ID,
+					"count", newCount)
+			} else {
+				klog.V(2).InfoS("No OOM counter increase",
+					"container", containerMetrics.ID,
+					"count", newCount)
 			}
 			feeder.oomCounters[containerMetrics.ID] = newCount
 		}

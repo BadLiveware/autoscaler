@@ -43,10 +43,17 @@
   - [x] Emit metrics/logs for telemetry query success/failure and OOM ingestion events.
   - [x] Surface new VPA conditions for telemetry failures (ConfigUnsupported for invalid config).
   - [x] **Testing:** Verify metrics emission and condition updates in error scenarios.
-7. [ ] **Integration & E2E Testing**
-  - [ ] Integration tests with fake Prometheus server to verify full pipeline.
-  - [ ] E2E tests demonstrating VPA with Prometheus telemetry source.
-  - [ ] Verify fallback behavior when Prometheus is unavailable.
+7. [x] **Integration & E2E Testing**
+  - [x] Integration tests with fake Prometheus server to verify full pipeline.
+  - [x] E2E tests demonstrating VPA with Prometheus telemetry source.
+    - [x] Prometheus deployment manifest with cadvisor scraping (RBAC includes nodes/proxy).
+    - [x] Pushgateway deployment for injecting fake OOM metrics in tests.
+    - [x] E2E test infrastructure updated to optionally deploy Prometheus via DEPLOY_PROMETHEUS env var.
+    - [x] Added `prometheus-telemetry` suite option to `hack/run-e2e-locally.sh`.
+    - [x] Tests labeled with "PrometheusRequired" for selective execution.
+    - [x] Pushgateway utilities for pushing fake metrics from tests.
+    - [x] OOM detection test using Pushgateway to simulate OOM counter deltas.
+  - [x] Verify fallback behavior when Prometheus is unavailable.
 8. [x] **Documentation & Examples**
   - [x] Update CRD docs/examples to demonstrate `spec.telemetry` usage.
   - [x] Provide sample Prometheus configuration.
@@ -61,9 +68,10 @@
 - Direct OpenTelemetry ingestion (pending future design).
 - Admission controller/updater telemetry changes (focus on recommender path).
 
-### Next Steps
-1. Implement config parsing and feed into recommender factory (Workstream 1).
-2. Wire metrics client selection and Prometheus config plumbing (Workstream 2).
-3. Build Prometheus query + OOM counter logic (Workstreams 3 & 4).
-4. Add validation, logging, and tests (Workstreams 5–7).
-5. Refresh docs and examples once functionality lands (Workstream 8).
+### Implementation Notes
+- **OOM Counter Delta Tracking:** Fixed to use container memory request (not actual usage) when recording OOM events, matching the existing Kubernetes OOM observer behavior. This ensures recommendations increase appropriately (e.g., 250Mi → ~422Mi with 3 OOM events).
+- **E2E Testing:** Pushgateway-based OOM simulation proved reliable for testing OOM detection without triggering actual container OOMs.
+- **Partial Custom Queries:** The system correctly handles cases where only some queries (e.g., OOM) are customized, falling back to defaults for others.
+
+### Completion Status
+All workstreams completed and tested. E2E tests pass with both basic Prometheus metrics and OOM detection from custom counters.

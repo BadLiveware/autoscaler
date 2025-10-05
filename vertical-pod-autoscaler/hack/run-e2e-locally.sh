@@ -21,7 +21,7 @@ BASE_NAME=$(basename $0)
 SCRIPT_ROOT=$(dirname ${BASH_SOURCE})/..
 
 function print_help {
-  echo "ERROR! Usage: $BASE_NAME <suite>"
+  echo "Usage: $BASE_NAME [--keep-cluster] <suite>"
   echo "<suite> should be one of:"
   echo " - recommender"
   echo " - recommender-externalmetrics"
@@ -29,19 +29,43 @@ function print_help {
   echo " - admission-controller"
   echo " - actuation"
   echo " - full-vpa"
+  echo " - prometheus-telemetry"
+  echo ""
+  echo "Options:"
+  echo "  --keep-cluster  Skip cluster deletion and reuse existing KIND cluster"
 }
 
-if [ $# -eq 0 ]; then
+KEEP_CLUSTER=false
+SUITE=""
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --keep-cluster)
+      KEEP_CLUSTER=true
+      shift
+      ;;
+    -h|--help)
+      print_help
+      exit 0
+      ;;
+    *)
+      if [ -z "$SUITE" ]; then
+        SUITE=$1
+      else
+        echo "ERROR: Unexpected argument: $1"
+        print_help
+        exit 1
+      fi
+      shift
+      ;;
+  esac
+done
+
+if [ -z "$SUITE" ]; then
   print_help
   exit 1
 fi
-
-if [ $# -gt 1 ]; then
-  print_help
-  exit 1
-fi
-
-SUITE=$1
 REQUIRED_COMMANDS="
 docker
 go
@@ -69,16 +93,24 @@ then
   exit 1
 fi
 
-
-echo "Deleting KIND cluster 'kind'."
-kind delete cluster -n kind -q
-
-echo "Creating KIND cluster 'kind'"
-KIND_VERSION="kindest/node:v1.33.0@sha256:02f73d6ae3f11ad5d543f16736a2cb2a63a300ad60e81dac22099b0b04784a4e"
-if ! kind create cluster --image=${KIND_VERSION}; then
-    echo "Failed to create KIND cluster. Exiting. Make sure kind version is updated."
-    echo "Available versions: https://github.com/kubernetes-sigs/kind/releases"
+if [ "$KEEP_CLUSTER" = true ]; then
+  echo "Reusing existing KIND cluster (--keep-cluster specified)"
+  if ! kind get clusters 2>/dev/null | grep -q '^kind$'; then
+    echo "ERROR: No KIND cluster named 'kind' exists. Cannot reuse cluster."
+    echo "Run without --keep-cluster to create a new cluster."
     exit 1
+  fi
+else
+  echo "Deleting KIND cluster 'kind'."
+  kind delete cluster -n kind -q
+
+  echo "Creating KIND cluster 'kind'"
+  KIND_VERSION="kindest/node:v1.33.0@sha256:02f73d6ae3f11ad5d543f16736a2cb2a63a300ad60e81dac22099b0b04784a4e"
+  if ! kind create cluster --image=${KIND_VERSION}; then
+      echo "Failed to create KIND cluster. Exiting. Make sure kind version is updated."
+      echo "Available versions: https://github.com/kubernetes-sigs/kind/releases"
+      exit 1
+  fi
 fi
 
 echo "Building metrics-pump image"
@@ -98,6 +130,24 @@ case ${SUITE} in
        WORKSPACE=./workspace/_artifacts ${SCRIPT_ROOT}/hack/run-e2e-tests.sh recommender
     else
       WORKSPACE=./workspace/_artifacts ${SCRIPT_ROOT}/hack/run-e2e-tests.sh ${SUITE}
+    fi
+    ;;
+  prometheus-telemetry)
+    ${SCRIPT_ROOT}/hack/vpa-down.sh
+    echo " ** Deploying for suite prometheus-telemetry"
+    DEPLOY_PROMETHEUS=true ${SCRIPT_ROOT}/hack/deploy-for-e2e-locally.sh full-vpa
+
+    echo " ** Running Prometheus telemetry E2E tests only"
+    export KUBECONFIG=$HOME/.kube/config
+    export WORKSPACE=./workspace/_artifacts
+    mkdir -p ${WORKSPACE}
+    pushd ${SCRIPT_ROOT}/e2e
+    go test ./v1/*go -v --test.timeout=30m --args --ginkgo.v=true --ginkgo.label-filter="PrometheusRequired" --report-dir=${WORKSPACE} --disable-log-dump --ginkgo.timeout=30m
+    TEST_RESULT=$?
+    popd
+    if [ $TEST_RESULT -gt 0 ]; then
+      echo "Prometheus telemetry tests failed"
+      exit 1
     fi
     ;;
   *)
