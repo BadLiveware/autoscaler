@@ -335,6 +335,9 @@ var (
 	// ConfigUnsupported indicates that this VPA configuration is unsupported
 	// and recommendations will not be provided for it.
 	ConfigUnsupported VerticalPodAutoscalerConditionType = "ConfigUnsupported"
+	// TelemetryUnavailable indicates that the configured telemetry source is unreachable
+	// or failing, preventing the VPA from fetching metrics.
+	TelemetryUnavailable VerticalPodAutoscalerConditionType = "TelemetryUnavailable"
 )
 
 // VerticalPodAutoscalerCondition describes the state of
@@ -450,6 +453,16 @@ type TelemetryConfig struct {
 	// is set to TelemetrySourcePrometheus.
 	// +optional
 	Prometheus *PrometheusTelemetry `json:"prometheus,omitempty" protobuf:"bytes,2,opt,name=prometheus"`
+
+	// FallbackOnFailure controls whether the VPA should fall back to Kubernetes
+	// metrics-server if the primary telemetry source fails.
+	// When true, the VPA will use Kubernetes metrics-server as a fallback if
+	// Prometheus (or other configured source) becomes unreachable.
+	// When false (default), the VPA will fail-closed and not provide recommendations
+	// if the configured telemetry source is unavailable.
+	// Default: false (fail-closed for safety)
+	// +optional
+	FallbackOnFailure *bool `json:"fallbackOnFailure,omitempty" protobuf:"bytes,3,opt,name=fallbackOnFailure"`
 }
 
 // TelemetrySource enumerates supported telemetry providers.

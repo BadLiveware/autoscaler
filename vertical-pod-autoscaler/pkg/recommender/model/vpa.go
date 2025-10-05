@@ -113,6 +113,15 @@ type Vpa struct {
 	PodCount int
 	// Telemetry defines how runtime signals are sourced for this VPA.
 	Telemetry *vpa_types.TelemetryConfig
+	// TelemetryFailed indicates that the telemetry source failed and fallback is disabled.
+	// When true, metrics for this VPA's pods should be ignored (fail-closed behavior).
+	TelemetryFailed bool
+	// UsingFallback indicates that the VPA is currently using fallback telemetry source.
+	// When true, the VPA is configured for Prometheus but using Kubernetes metrics due to failure.
+	UsingFallback bool
+	// Using OOMOnly indicates that Prometheus provides only OOM counters, not CPU/Memory.
+	// When true, Kubernetes metrics-server should provide CPU/Memory metrics.
+	UsingOOMOnly bool
 }
 
 // NewVpa returns a new Vpa with a given ID and pod selector. Doesn't set the
@@ -169,6 +178,9 @@ func (vpa *Vpa) SetTelemetryConfig(config *vpa_types.TelemetryConfig, defaults *
 			telemetryCopy.Prometheus = userCopy.Prometheus.DeepCopy()
 		} else if telemetryCopy.Source == vpa_types.TelemetrySourcePrometheus {
 			telemetryCopy.Prometheus = nil
+		}
+		if userCopy.FallbackOnFailure != nil {
+			telemetryCopy.FallbackOnFailure = userCopy.FallbackOnFailure
 		}
 	}
 

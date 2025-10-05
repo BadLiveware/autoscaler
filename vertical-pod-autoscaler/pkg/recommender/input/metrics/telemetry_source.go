@@ -119,9 +119,54 @@ func (t *TelemetryAwareSource) List(ctx context.Context, namespace string, opts 
 		promMetrics, oomCounters, err := t.fetchPrometheusMetrics(ctx, address, vpas)
 		if err != nil {
 			klog.ErrorS(err, "Failed to fetch Prometheus metrics", "address", address, "vpaCount", len(vpas))
-			// TODO: Set VPA condition for telemetry failure
+
+			// Set TelemetryUnavailable condition and emit metrics for affected VPAs
+			for _, vpa := range vpas {
+				t.setTelemetryCondition(vpa, address, err)
+				RecordTelemetryError(vpa.ID.Namespace, vpa.ID.VpaName, TelemetrySourcePrometheus, err)
+
+				// Check if fallback is enabled for this VPA
+				if t.shouldFallback(vpa) {
+					klog.InfoS("Falling back to Kubernetes metrics-server",
+						"vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName),
+						"reason", "Prometheus unavailable")
+
+					// Mark as using fallback so we don't filter out Kubernetes metrics
+					vpa.UsingFallback = true
+					vpa.TelemetryFailed = false
+
+					// Fetch metrics from Kubernetes immediately for this VPA
+					fallbackMetrics, fallbackErr := t.defaultSource.List(ctx, namespace, opts)
+					if fallbackErr != nil {
+						klog.ErrorS(fallbackErr, "Failed to fetch fallback metrics from Kubernetes",
+							"vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName))
+					} else if fallbackMetrics != nil {
+						result.Items = append(result.Items, fallbackMetrics.Items...)
+						klog.V(3).InfoS("Successfully fell back to Kubernetes metrics",
+							"vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName),
+							"metricCount", len(fallbackMetrics.Items))
+					}
+				} else {
+					// Fallback disabled - mark VPA as telemetry failed (fail-closed)
+					vpa.TelemetryFailed = true
+					vpa.UsingFallback = false
+					klog.InfoS("Telemetry failed and fallback disabled, VPA will not receive metrics",
+						"vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName))
+				}
+			}
 			continue
 		}
+
+		// Clear TelemetryUnavailable condition and record success for affected VPAs
+		for _, vpa := range vpas {
+			t.clearTelemetryCondition(vpa)
+			RecordTelemetrySuccess(vpa.ID.Namespace, vpa.ID.VpaName, TelemetrySourcePrometheus)
+			// Clear telemetry status flags on success
+			vpa.TelemetryFailed = false
+			vpa.UsingFallback = false
+			// UsingOOMOnly should remain set if it was set in hasOnlyCustomOOM path
+		}
+
 		if promMetrics != nil {
 			result.Items = append(result.Items, promMetrics.Items...)
 		}
@@ -235,16 +280,48 @@ func (t *TelemetryAwareSource) fetchPrometheusMetrics(ctx context.Context, addre
 
 	useFullCustomQueries := cpuQuery != "" && memoryQuery != ""
 
-	if useFullCustomQueries {
+	// If only OOM is custom (partial custom queries), use Kubernetes for CPU/Memory
+	// and only fetch OOM from Prometheus to avoid empty result issues
+	hasOnlyCustomOOM := oomQuery != "" && cpuQuery == "" && memoryQuery == ""
+
+	if hasOnlyCustomOOM {
+		// Only OOM query is custom - fetch only OOM counters from Prometheus
+		// CPU/Memory should come from Kubernetes metrics-server
+		klog.V(3).InfoS("Fetching only OOM counters from Prometheus (partial custom queries)",
+			"address", address, "vpaCount", len(vpas))
+
+		oomCounters, err := t.queryOOMCounters(ctx, client, oomQuery, now)
+		if err != nil {
+			klog.ErrorS(err, "Failed to query OOM counters from Prometheus", "address", address)
+			// OOM query failed - but don't fail the whole fetch since CPU/Memory come from Kubernetes
+			// Just log the error and continue
+		} else {
+			maps.Copy(allOOMCounters, oomCounters)
+			klog.V(4).InfoS("Successfully queried OOM counters", "query", oomQuery, "count", len(oomCounters))
+		}
+
+		// Don't fetch CPU/Memory from Prometheus - return empty podMetrics
+		// Kubernetes metrics-server will provide those via normal flow
+		// Mark VPAs as using OOM-only mode so Kubernetes metrics aren't skipped
+		for _, vpa := range vpas {
+			vpa.UsingOOMOnly = true
+		}
+		klog.V(4).InfoS("Fetched Prometheus metrics (OOM only)", "address", address, "vpaCount", len(vpas), "oomCounters", len(allOOMCounters))
+		return result, allOOMCounters, nil
+	} else if useFullCustomQueries {
 		// All required queries are custom: use as-is without pod filtering
 		cpuMetrics, err := t.queryPrometheus(ctx, client, cpuQuery, now)
 		if err != nil {
 			klog.ErrorS(err, "Failed to query CPU metrics from Prometheus", "address", address)
+			// Return error for CPU query failure - this is a critical metric
+			return nil, nil, fmt.Errorf("cpu query failed: %w", err)
 		}
 
 		memoryMetrics, err := t.queryPrometheus(ctx, client, memoryQuery, now)
 		if err != nil {
 			klog.ErrorS(err, "Failed to query memory metrics from Prometheus", "address", address)
+			// Return error for memory query failure - this is a critical metric
+			return nil, nil, fmt.Errorf("memory query failed: %w", err)
 		}
 
 		var oomCounters map[model.ContainerID]uint64
@@ -252,6 +329,7 @@ func (t *TelemetryAwareSource) fetchPrometheusMetrics(ctx context.Context, addre
 			oomCounters, err = t.queryOOMCounters(ctx, client, oomQuery, now)
 			if err != nil {
 				klog.ErrorS(err, "Failed to query OOM counters from Prometheus", "address", address)
+				// OOM counter is optional - don't fail the whole fetch if it's unavailable
 			} else {
 				maps.Copy(allOOMCounters, oomCounters)
 			}
@@ -263,14 +341,23 @@ func (t *TelemetryAwareSource) fetchPrometheusMetrics(ctx context.Context, addre
 		}
 	} else {
 		// Use per-VPA queries (optimized with pod selectors, supports partial custom queries)
+		var lastErr error
+		successCount := 0
 		for _, vpa := range vpas {
 			vpaMetrics, vpaOOMCounters, err := t.fetchPrometheusMetricsForVPA(ctx, client, vpa, now, queryConfig)
 			if err != nil {
 				klog.ErrorS(err, "Failed to fetch Prometheus metrics for VPA", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName))
+				lastErr = err
 				continue
 			}
+			successCount++
 			result.Items = append(result.Items, vpaMetrics.Items...)
 			maps.Copy(allOOMCounters, vpaOOMCounters)
+		}
+
+		// If ALL VPAs failed, return the error to trigger fallback
+		if successCount == 0 && lastErr != nil {
+			return nil, nil, fmt.Errorf("all VPA queries failed: %w", lastErr)
 		}
 	}
 
@@ -351,19 +438,30 @@ func (t *TelemetryAwareSource) fetchPrometheusMetricsForVPA(ctx context.Context,
 		oomQuery = fmt.Sprintf(defaultOOMQueryTemplate, namespace, podNames)
 	}
 
+	cpuStart := time.Now()
 	cpuMetrics, err := t.queryPrometheus(ctx, client, cpuQuery, timestamp)
+	RecordQueryDuration(vpa.ID.Namespace, vpa.ID.VpaName, TelemetrySourcePrometheus, "cpu", time.Since(cpuStart))
 	if err != nil {
 		klog.V(4).InfoS("Failed to query CPU metrics", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName), "error", err)
+		// Return error for CPU query failure - this is a critical metric
+		return nil, nil, fmt.Errorf("cpu query failed: %w", err)
 	}
 
+	memoryStart := time.Now()
 	memoryMetrics, err := t.queryPrometheus(ctx, client, memoryQuery, timestamp)
+	RecordQueryDuration(vpa.ID.Namespace, vpa.ID.VpaName, TelemetrySourcePrometheus, "memory", time.Since(memoryStart))
 	if err != nil {
 		klog.V(4).InfoS("Failed to query memory metrics", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName), "error", err)
+		// Return error for memory query failure - this is a critical metric
+		return nil, nil, fmt.Errorf("memory query failed: %w", err)
 	}
 
+	oomStart := time.Now()
 	oomCounters, err := t.queryOOMCounters(ctx, client, oomQuery, timestamp)
+	RecordQueryDuration(vpa.ID.Namespace, vpa.ID.VpaName, TelemetrySourcePrometheus, "oom", time.Since(oomStart))
 	if err != nil {
 		klog.ErrorS(err, "Failed to query OOM counters", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName), "query", oomQuery)
+		// OOM counter is optional - don't fail the whole fetch if it's unavailable
 	} else {
 		klog.V(4).InfoS("Successfully queried OOM counters", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName), "query", oomQuery, "count", len(oomCounters))
 		maps.Copy(allOOMCounters, oomCounters)
@@ -567,4 +665,48 @@ func (t *prometheusBasicAuthTransport) RoundTrip(req *http.Request) (*http.Respo
 	cloned := req.Clone(req.Context())
 	cloned.SetBasicAuth(t.username, t.password)
 	return rt.RoundTrip(cloned)
+}
+
+// setTelemetryCondition sets the TelemetryUnavailable condition on a VPA.
+func (t *TelemetryAwareSource) setTelemetryCondition(vpa *model.Vpa, address string, err error) {
+	if vpa == nil {
+		return
+	}
+
+	message := FormatTelemetryConditionMessage(TelemetrySourcePrometheus, address, err)
+	reason := ClassifyTelemetryError(err)
+
+	vpa.Conditions.Set(vpa_types.TelemetryUnavailable, true, reason, message)
+	klog.V(2).InfoS("Set TelemetryUnavailable condition",
+		"vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName),
+		"reason", reason,
+		"message", message)
+}
+
+// clearTelemetryCondition removes the TelemetryUnavailable condition from a VPA.
+func (t *TelemetryAwareSource) clearTelemetryCondition(vpa *model.Vpa) {
+	if vpa == nil {
+		return
+	}
+
+	// Only clear if the condition was set
+	if _, exists := vpa.Conditions[vpa_types.TelemetryUnavailable]; exists {
+		delete(vpa.Conditions, vpa_types.TelemetryUnavailable)
+		klog.V(3).InfoS("Cleared TelemetryUnavailable condition",
+			"vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName))
+	}
+}
+
+// shouldFallback checks if a VPA should fall back to Kubernetes metrics-server on failure.
+func (t *TelemetryAwareSource) shouldFallback(vpa *model.Vpa) bool {
+	if vpa == nil || vpa.Telemetry == nil {
+		return false
+	}
+
+	// Default is false (fail-closed for safety)
+	if vpa.Telemetry.FallbackOnFailure == nil {
+		return false
+	}
+
+	return *vpa.Telemetry.FallbackOnFailure
 }

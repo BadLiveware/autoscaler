@@ -21,7 +21,7 @@ BASE_NAME=$(basename $0)
 SCRIPT_ROOT=$(dirname ${BASH_SOURCE})/..
 
 function print_help {
-  echo "Usage: $BASE_NAME [--keep-cluster] <suite>"
+  echo "Usage: $BASE_NAME [--keep-cluster] [--focus <pattern>] <suite>"
   echo "<suite> should be one of:"
   echo " - recommender"
   echo " - recommender-externalmetrics"
@@ -32,11 +32,13 @@ function print_help {
   echo " - prometheus-telemetry"
   echo ""
   echo "Options:"
-  echo "  --keep-cluster  Skip cluster deletion and reuse existing KIND cluster"
+  echo "  --keep-cluster       Skip cluster deletion and reuse existing KIND cluster"
+  echo "  --focus <pattern>    Run only tests matching the pattern (ginkgo focus)"
 }
 
 KEEP_CLUSTER=false
 SUITE=""
+FOCUS_PATTERN=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -44,6 +46,15 @@ while [[ $# -gt 0 ]]; do
     --keep-cluster)
       KEEP_CLUSTER=true
       shift
+      ;;
+    --focus)
+      if [ -z "$2" ] || [[ "$2" == --* ]]; then
+        echo "ERROR: --focus requires a pattern argument"
+        print_help
+        exit 1
+      fi
+      FOCUS_PATTERN="$2"
+      shift 2
       ;;
     -h|--help)
       print_help
@@ -142,7 +153,14 @@ case ${SUITE} in
     export WORKSPACE=./workspace/_artifacts
     mkdir -p ${WORKSPACE}
     pushd ${SCRIPT_ROOT}/e2e
-    go test ./v1/*go -v --test.timeout=30m --args --ginkgo.v=true --ginkgo.label-filter="PrometheusRequired" --report-dir=${WORKSPACE} --disable-log-dump --ginkgo.timeout=30m
+    
+    GINKGO_ARGS="--ginkgo.v=true --ginkgo.label-filter=PrometheusRequired --report-dir=${WORKSPACE} --disable-log-dump --ginkgo.timeout=30m"
+    if [ -n "$FOCUS_PATTERN" ]; then
+      echo "Focusing on tests matching: $FOCUS_PATTERN"
+      GINKGO_ARGS="$GINKGO_ARGS --ginkgo.focus=$FOCUS_PATTERN"
+    fi
+    
+    go test ./v1/*go -v --test.timeout=30m --args $GINKGO_ARGS
     TEST_RESULT=$?
     popd
     if [ $TEST_RESULT -gt 0 ]; then

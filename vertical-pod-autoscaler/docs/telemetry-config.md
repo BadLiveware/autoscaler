@@ -80,14 +80,46 @@ spec:
 
 ## OOM Event Handling
 
+### Two Types of OOMs
+
+The VPA tracks **two distinct types of OOM events** that are mutually exclusive:
+
+#### 1. Application-Level OOM (Prometheus-detected)
+- **What:** Managed runtimes (e.g., .NET CLR, JVM) throw OOM exceptions internally
+- **Container state:** Remains **RUNNING** - exception handled at application level
+- **Detection:** Prometheus custom metrics (e.g., `dotnet_oom_exceptions_total`, `jvm_oom_count`)
+- **Kubernetes OOMKilled:** Does **NOT** fire (kernel never intervened)
+- **Example:** .NET `OutOfMemoryException` during request processing
+
+#### 2. Kernel-Level OOM (Kubernetes OOMKilled)
+- **What:** Container memory exceeds cgroup limits, killed by kernel
+- **Container state:** **TERMINATED** - process forcibly killed
+- **Detection:** Kubernetes pod status shows `OOMKilled`, restart count increments
+- **Prometheus:** **CANNOT** see this (container is dead, can't report metrics)
+- **Example:** Extremely constrained startup where container hits memory limit before runtime initializes
+
+### Why Both Mechanisms Must Be Active
+
+For managed memory languages (e.g., .NET, Java), both OOM types can occur:
+- **Common:** Application OOM exceptions during normal operation → Detected by Prometheus
+- **Rare:** Kernel OOMKilled during constrained startup → Detected by Kubernetes events
+
+**Double-counting is impossible** because these events are mutually exclusive:
+- If Prometheus sees an OOM counter increment → container is alive → Kubernetes OOMKilled did NOT fire
+- If Kubernetes reports OOMKilled → container is dead → Prometheus cannot scrape it
+
 ### Prometheus OOM Counters
-- Requires cumulative counter metric (e.g., `container_oom_events_total`)
+- Requires cumulative counter metric (e.g., `container_oom_events_total` or custom application metrics)
 - System tracks previous values and detects deltas each cycle
 - Multiple OOMs between samples are recorded individually
+- Captures application-level OOM exceptions where container stays running
 
-### Fallback to Kubernetes Events
-- When Prometheus doesn't provide OOM counters, system uses pod status `OOMKilled` detection
-- Both mechanisms can coexist (Prometheus counters + Kubernetes events)
+### Kubernetes OOMKilled Events
+- Always active regardless of telemetry configuration
+- Monitors pod status for `OOMKilled` termination reason
+- Tracks container restart counts to detect new OOM events
+- Captures kernel-level OOMs where container is terminated
+- Essential fallback for OOMs that Prometheus cannot see
 
 ## How to Configure Telemetry
 
@@ -145,6 +177,35 @@ spec:
         basicAuthPassword: "password"
 ```
 
+### Configure VPA with Automatic Fallback on Prometheus Failure
+```yaml
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: prometheus-with-fallback-vpa
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: my-app
+  telemetry:
+    source: Prometheus
+    prometheus:
+      address: "http://prometheus.monitoring.svc:9090"
+    fallbackOnFailure: true  # Fall back to Kubernetes metrics-server if Prometheus fails
+```
+
+When `fallbackOnFailure: true`:
+- If Prometheus becomes unreachable, VPA automatically uses Kubernetes metrics-server
+- VPA continues providing recommendations (graceful degradation)
+- `TelemetryUnavailable` condition is set to alert you of the primary source failure
+- When Prometheus recovers, VPA automatically switches back
+
+When `fallbackOnFailure: false` or unset (default):
+- VPA fails-closed: no recommendations when Prometheus is unreachable
+- Safe default to prevent scaling decisions based on incomplete data
+- Alerts via condition and metrics for monitoring
+
 ## Validation
 
 The recommender validates telemetry configuration when loading VPAs:
@@ -154,9 +215,26 @@ The recommender validates telemetry configuration when loading VPAs:
 - Invalid authentication combinations
 
 ### Error Handling
+
+When a telemetry source fails (e.g., Prometheus becomes unreachable), the VPA recommender provides observability and optional fallback:
+
+#### Observability (Always Active)
+- Sets `TelemetryUnavailable` condition on the VPA with a helpful error message
+- Exposes `vpa_recommender_telemetry_status` metric (0=healthy, 1=failing)
+- Increments `vpa_recommender_telemetry_errors_total` counter
+- Logs errors: "Failed to fetch Prometheus metrics"
+
+#### Failure Behavior
+By default (`fallbackOnFailure: false` or unset):
+- **Fail-closed**: VPA gets NO metrics when Prometheus is unreachable
+- VPA does NOT provide recommendations (safe default to prevent incorrect scaling)
+- Recommender continues running and monitoring other VPAs
+
+With `fallbackOnFailure: true`:
+- VPA automatically falls back to Kubernetes metrics-server
+- Recommendations continue using metrics-server data
+- `TelemetryUnavailable` condition remains set to indicate primary source failure
 - Query failures are logged but don't block other VPAs
-- Fallback to Kubernetes metrics when Prometheus is unreachable (if address missing)
-- VPA conditions reflect telemetry issues
 
 ## Performance Considerations
 

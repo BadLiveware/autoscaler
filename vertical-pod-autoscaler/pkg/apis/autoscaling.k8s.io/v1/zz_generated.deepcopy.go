@@ -314,6 +314,11 @@ func (in *TelemetryConfig) DeepCopyInto(out *TelemetryConfig) {
 		*out = new(PrometheusTelemetry)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.FallbackOnFailure != nil {
+		in, out := &in.FallbackOnFailure, &out.FallbackOnFailure
+		*out = new(bool)
+		**out = **in
+	}
 	return
 }
 

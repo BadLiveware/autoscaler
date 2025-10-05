@@ -408,6 +408,16 @@ spec:
                   Telemetry defines how the VPA should source runtime signals such as
                   usage metrics and OOM events.
                 properties:
+                  fallbackOnFailure:
+                    description: |-
+                      FallbackOnFailure controls whether the VPA should fall back to Kubernetes
+                      metrics-server if the primary telemetry source fails.
+                      When true, the VPA will use Kubernetes metrics-server as a fallback if
+                      Prometheus (or other configured source) becomes unreachable.
+                      When false (default), the VPA will fail-closed and not provide recommendations
+                      if the configured telemetry source is unavailable.
+                      Default: false (fail-closed for safety)
+                    type: boolean
                   prometheus:
                     description: |-
                       Prometheus configures a Prometheus-compatible backend when the source

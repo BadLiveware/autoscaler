@@ -508,6 +508,43 @@ func (feeder *clusterStateFeeder) LoadPods() {
 	}
 }
 
+// shouldSkipMetricsForPod checks if a pod's metrics should be skipped based on VPA telemetry config.
+// This prevents Kubernetes metrics from being used when a VPA is configured for Prometheus.
+//
+// Metrics are fetched namespace-wide (architectural limitation of Kubernetes metrics API),
+// so if ANY VPA in a namespace uses Kubernetes metrics, ALL pods get Kubernetes metrics.
+// This function filters to ensure each VPA only receives metrics from its configured source.
+func (feeder *clusterStateFeeder) shouldSkipMetricsForPod(pod *model.PodState) bool {
+	// Get the VPA controlling this pod
+	vpa := feeder.clusterState.GetControllingVPA(pod)
+	if vpa == nil {
+		return false
+	}
+
+	// Skip if telemetry failed and fallback is disabled (fail-closed)
+	if vpa.TelemetryFailed {
+		return true
+	}
+
+	// Don't skip if using fallback - VPA needs Kubernetes metrics
+	if vpa.UsingFallback {
+		return false
+	}
+
+	// Skip Kubernetes metrics for VPAs configured for Prometheus when Prometheus is working.
+	// This prevents duplicate/wrong metrics when multiple VPAs in the same namespace use different sources.
+	if vpa.Telemetry != nil && vpa.Telemetry.Source == vpa_types.TelemetrySourcePrometheus {
+		// Exception: if using OOM-only mode, allow Kubernetes metrics for CPU/Memory
+		if vpa.UsingOOMOnly {
+			return false
+		}
+		// This VPA wants Prometheus metrics, not Kubernetes metrics
+		return true
+	}
+
+	return false
+}
+
 func (feeder *clusterStateFeeder) LoadRealTimeMetrics(ctx context.Context) {
 	containersMetrics, err := feeder.metricsClient.GetContainersMetrics(ctx)
 	if err != nil {
@@ -522,6 +559,15 @@ func (feeder *clusterStateFeeder) LoadRealTimeMetrics(ctx context.Context) {
 		if pod, exists := feeder.clusterState.Pods()[containerMetrics.ID.PodID]; exists && pod != nil {
 			if slices.Contains(pod.InitContainers, containerMetrics.ID.ContainerName) {
 				klog.V(3).InfoS("Skipping metric samples for init container", "pod", klog.KRef(containerMetrics.ID.Namespace, containerMetrics.ID.PodName), "container", containerMetrics.ID.ContainerName)
+				droppedSampleCount += len(containerMetrics.Usage)
+				continue
+			}
+
+			// Check if this pod belongs to a VPA with failed telemetry (fail-closed)
+			if feeder.shouldSkipMetricsForPod(pod) {
+				klog.V(3).InfoS("Skipping metrics for pod (VPA telemetry failed, fail-closed)",
+					"pod", klog.KRef(containerMetrics.ID.Namespace, containerMetrics.ID.PodName),
+					"container", containerMetrics.ID.ContainerName)
 				droppedSampleCount += len(containerMetrics.Usage)
 				continue
 			}

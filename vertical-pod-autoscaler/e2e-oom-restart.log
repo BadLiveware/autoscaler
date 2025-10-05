@@ -1,0 +1,699 @@
+Reusing existing KIND cluster (--keep-cluster specified)
+Building metrics-pump image
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile.externalmetrics-writer
+#1 transferring dockerfile: 742B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/python:3.10-slim
+#2 ...
+
+#3 [auth] library/python:pull token for registry-1.docker.io
+#3 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/python:3.10-slim
+#2 DONE 1.2s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 2B done
+#4 DONE 0.0s
+
+#5 [1/3] FROM docker.io/library/python:3.10-slim@sha256:77f72bc159950ab208b8bbb9a7b22868984e004ce62966d1ca9268c346c73c64
+#5 resolve docker.io/library/python:3.10-slim@sha256:77f72bc159950ab208b8bbb9a7b22868984e004ce62966d1ca9268c346c73c64 0.0s done
+#5 DONE 0.0s
+
+#6 [internal] load build context
+#6 transferring context: 37B done
+#6 DONE 0.2s
+
+#7 [2/3] RUN pip3 install kubernetes argparse requests
+#7 CACHED
+
+#8 [3/3] COPY emit-metrics.py /
+#8 CACHED
+
+#9 exporting to image
+#9 exporting layers done
+#9 exporting manifest sha256:333fb770a34ff3228cddd8e9298a17bb3ed060ad5aa6a15a62594fac0aef9ab2 done
+#9 exporting config sha256:366968f45b37e05969f37964f5fdad1e16d24167205754ef6e8769aea8c6f34a done
+#9 exporting attestation manifest sha256:733f3a54d94a549066292f57491cb6fbe62834cae75839c00e069ba78e2f4266 0.0s done
+#9 exporting manifest list sha256:bb6978a7aced1090d8a277c0f4927e3da0a9db3921ba2ccead06573020e55c29 0.0s done
+#9 naming to localhost:5001/write-metrics:dev done
+#9 unpacking to localhost:5001/write-metrics:dev done
+#9 DONE 0.1s
+  loading image into kind
+Image: "localhost:5001/write-metrics:dev" with ID "sha256:bb6978a7aced1090d8a277c0f4927e3da0a9db3921ba2ccead06573020e55c29" not yet present on node "kind-control-plane", loading...
+customresourcedefinition.apiextensions.k8s.io "verticalpodautoscalercheckpoints.autoscaling.k8s.io" deleted
+customresourcedefinition.apiextensions.k8s.io "verticalpodautoscalers.autoscaling.k8s.io" deleted
+clusterrole.rbac.authorization.k8s.io "system:metrics-reader" deleted
+clusterrole.rbac.authorization.k8s.io "system:vpa-actor" deleted
+clusterrole.rbac.authorization.k8s.io "system:vpa-status-actor" deleted
+clusterrole.rbac.authorization.k8s.io "system:vpa-checkpoint-actor" deleted
+clusterrole.rbac.authorization.k8s.io "system:evictioner" deleted
+clusterrole.rbac.authorization.k8s.io "system:vpa-updater-in-place" deleted
+clusterrolebinding.rbac.authorization.k8s.io "system:vpa-updater-in-place-binding" deleted
+clusterrolebinding.rbac.authorization.k8s.io "system:metrics-reader" deleted
+clusterrolebinding.rbac.authorization.k8s.io "system:vpa-actor" deleted
+clusterrolebinding.rbac.authorization.k8s.io "system:vpa-status-actor" deleted
+clusterrolebinding.rbac.authorization.k8s.io "system:vpa-checkpoint-actor" deleted
+clusterrole.rbac.authorization.k8s.io "system:vpa-target-reader" deleted
+clusterrolebinding.rbac.authorization.k8s.io "system:vpa-target-reader-binding" deleted
+clusterrolebinding.rbac.authorization.k8s.io "system:vpa-evictioner-binding" deleted
+serviceaccount "vpa-admission-controller" deleted
+serviceaccount "vpa-recommender" deleted
+serviceaccount "vpa-updater" deleted
+clusterrole.rbac.authorization.k8s.io "system:vpa-admission-controller" deleted
+clusterrolebinding.rbac.authorization.k8s.io "system:vpa-admission-controller" deleted
+clusterrole.rbac.authorization.k8s.io "system:vpa-status-reader" deleted
+clusterrolebinding.rbac.authorization.k8s.io "system:vpa-status-reader-binding" deleted
+role.rbac.authorization.k8s.io "system:leader-locking-vpa-updater" deleted
+rolebinding.rbac.authorization.k8s.io "system:leader-locking-vpa-updater" deleted
+role.rbac.authorization.k8s.io "system:leader-locking-vpa-recommender" deleted
+rolebinding.rbac.authorization.k8s.io "system:leader-locking-vpa-recommender" deleted
+deployment.apps "vpa-updater" deleted
+deployment.apps "vpa-recommender" deleted
+Deleting VPA Admission Controller certs.
+secret "vpa-tls-certs" deleted
+secret "vpa-e2e-certs" deleted
+Unregistering VPA admission controller webhook
+Warning: deleting cluster-scoped resources, not scoped to the provided namespace
+mutatingwebhookconfiguration.admissionregistration.k8s.io "vpa-webhook-config" deleted
+service "vpa-webhook" deleted
+deployment.apps "vpa-admission-controller" deleted
+resource mapping not found for name: "verticalpodautoscalers.autoscaling.k8s.io" namespace: "" from "STDIN": no matches for kind "CustomResourceDefinition" in version "apiextensions.k8s.io/v1beta1"
+ensure CRDs are installed first
+resource mapping not found for name: "verticalpodautoscalercheckpoints.autoscaling.k8s.io" namespace: "" from "STDIN": no matches for kind "CustomResourceDefinition" in version "apiextensions.k8s.io/v1beta1"
+ensure CRDs are installed first
+ ** Deploying for suite prometheus-telemetry
+patching file ./hack/../hack/../hack/e2e/vpa-rbac.yaml (read from ./hack/../hack/../deploy/vpa-rbac.yaml)
+clusterrole.rbac.authorization.k8s.io/system:metrics-reader created
+clusterrole.rbac.authorization.k8s.io/system:vpa-actor created
+clusterrole.rbac.authorization.k8s.io/system:vpa-status-actor created
+clusterrole.rbac.authorization.k8s.io/system:vpa-checkpoint-actor created
+clusterrole.rbac.authorization.k8s.io/system:evictioner created
+clusterrole.rbac.authorization.k8s.io/system:vpa-updater-in-place created
+clusterrolebinding.rbac.authorization.k8s.io/system:vpa-updater-in-place-binding created
+clusterrolebinding.rbac.authorization.k8s.io/system:metrics-reader created
+clusterrolebinding.rbac.authorization.k8s.io/system:vpa-actor created
+clusterrolebinding.rbac.authorization.k8s.io/system:vpa-status-actor created
+clusterrolebinding.rbac.authorization.k8s.io/system:vpa-checkpoint-actor created
+clusterrole.rbac.authorization.k8s.io/system:vpa-target-reader created
+clusterrolebinding.rbac.authorization.k8s.io/system:vpa-target-reader-binding created
+clusterrolebinding.rbac.authorization.k8s.io/system:vpa-evictioner-binding created
+serviceaccount/vpa-admission-controller created
+serviceaccount/vpa-recommender created
+serviceaccount/vpa-updater created
+clusterrole.rbac.authorization.k8s.io/system:vpa-admission-controller created
+clusterrolebinding.rbac.authorization.k8s.io/system:vpa-admission-controller created
+clusterrole.rbac.authorization.k8s.io/system:vpa-status-reader created
+clusterrolebinding.rbac.authorization.k8s.io/system:vpa-status-reader-binding created
+role.rbac.authorization.k8s.io/system:leader-locking-vpa-updater created
+rolebinding.rbac.authorization.k8s.io/system:leader-locking-vpa-updater created
+role.rbac.authorization.k8s.io/system:leader-locking-vpa-recommender created
+rolebinding.rbac.authorization.k8s.io/system:leader-locking-vpa-recommender created
+customresourcedefinition.apiextensions.k8s.io/verticalpodautoscalercheckpoints.autoscaling.k8s.io created
+customresourcedefinition.apiextensions.k8s.io/verticalpodautoscalers.autoscaling.k8s.io created
+serviceaccount/local-metrics-server unchanged
+clusterrole.rbac.authorization.k8s.io/system:metrics-server-aggregated-reader unchanged
+clusterrole.rbac.authorization.k8s.io/system:local-metrics-server unchanged
+clusterrolebinding.rbac.authorization.k8s.io/local-metrics-server:system:auth-delegator unchanged
+clusterrolebinding.rbac.authorization.k8s.io/system:local-metrics-server unchanged
+rolebinding.rbac.authorization.k8s.io/local-metrics-server-auth-reader unchanged
+service/local-metrics-server unchanged
+deployment.apps/local-metrics-server configured
+apiservice.apiregistration.k8s.io/v1beta1.metrics.k8s.io unchanged
+Deploying Prometheus and Pushgateway for telemetry tests...
+namespace/monitoring unchanged
+serviceaccount/prometheus unchanged
+clusterrole.rbac.authorization.k8s.io/prometheus unchanged
+clusterrolebinding.rbac.authorization.k8s.io/prometheus unchanged
+configmap/prometheus-config unchanged
+deployment.apps/prometheus unchanged
+service/prometheus unchanged
+deployment.apps/pushgateway unchanged
+service/pushgateway unchanged
+Waiting for Prometheus to be ready...
+deployment.apps/prometheus condition met
+Waiting for Pushgateway to be ready...
+deployment.apps/pushgateway condition met
+make: Entering directory '/home/frla/code/autoscaler-upstream/vertical-pod-autoscaler/pkg/recommender'
+docker buildx build --pull --load --platform linux/amd64 --build-arg BUILD_LD_FLAGS="-s" -t localhost:5001/vpa-recommender-amd64:latest -f ./Dockerfile ../../
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.20kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/golang:1.24.6
+#2 ...
+
+#3 [internal] load metadata for gcr.io/distroless/static:nonroot
+#3 DONE 0.4s
+
+#4 [auth] library/golang:pull token for registry-1.docker.io
+#4 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/golang:1.24.6
+#2 DONE 1.0s
+
+#5 [internal] load .dockerignore
+#5 transferring context: 2B done
+#5 DONE 0.0s
+
+#6 [stage-1 1/2] FROM gcr.io/distroless/static:nonroot@sha256:e8a4044e0b4ae4257efa45fc026c0bc30ad320d43bd4c1a7d5271bd241e386d0
+#6 resolve gcr.io/distroless/static:nonroot@sha256:e8a4044e0b4ae4257efa45fc026c0bc30ad320d43bd4c1a7d5271bd241e386d0 0.0s done
+#6 DONE 0.0s
+
+#7 [builder 1/8] FROM docker.io/library/golang:1.24.6@sha256:8d9e57c5a6f2bede16fe674c16149eee20db6907129e02c4ad91ce5a697a4012
+#7 resolve docker.io/library/golang:1.24.6@sha256:8d9e57c5a6f2bede16fe674c16149eee20db6907129e02c4ad91ce5a697a4012 0.0s done
+#7 DONE 0.0s
+
+#8 [internal] load build context
+#8 transferring context: 48.27kB 0.0s done
+#8 DONE 0.0s
+
+#9 [builder 4/8] COPY go.sum go.sum
+#9 CACHED
+
+#10 [builder 3/8] COPY go.mod go.mod
+#10 CACHED
+
+#11 [builder 2/8] WORKDIR /workspace
+#11 CACHED
+
+#12 [builder 5/8] RUN go mod download
+#12 CACHED
+
+#13 [builder 6/8] COPY common common
+#13 CACHED
+
+#14 [builder 7/8] COPY pkg pkg
+#14 DONE 0.1s
+
+#15 [builder 8/8] RUN CGO_ENABLED=0 GOARCH=amd64 GOOS=linux go build -C pkg/recommender -ldflags="-s" -o recommender-amd64
+#15 DONE 29.9s
+
+#6 [stage-1 1/2] FROM gcr.io/distroless/static:nonroot@sha256:e8a4044e0b4ae4257efa45fc026c0bc30ad320d43bd4c1a7d5271bd241e386d0
+#6 CACHED
+
+#16 [stage-1 2/2] COPY --from=builder /workspace/pkg/recommender/recommender-amd64 /recommender
+#16 DONE 0.1s
+
+#17 exporting to image
+#17 exporting layers
+#17 exporting layers 1.1s done
+#17 exporting manifest sha256:f562196a753116e7594793e65164384a82c3a019a944b9c60046e9b4f619f386 0.0s done
+#17 exporting config sha256:7f4248d4925c64bccef42714cd4a29e3cba704922baeed3cd5ea6665cf7b36f6 0.0s done
+#17 exporting attestation manifest sha256:5830434c5c82273ed23230a5e2fd799ff616f5f47cf2fd3528ea408788f56f3b 0.0s done
+#17 exporting manifest list sha256:a2febd53e65342043145d2c0b19744b441496369c5097dc02b5fd09b583d8d22 0.0s done
+#17 naming to localhost:5001/vpa-recommender-amd64:latest done
+#17 unpacking to localhost:5001/vpa-recommender-amd64:latest
+#17 unpacking to localhost:5001/vpa-recommender-amd64:latest 0.2s done
+#17 DONE 1.4s
+make: Leaving directory '/home/frla/code/autoscaler-upstream/vertical-pod-autoscaler/pkg/recommender'
+Image: "localhost:5001/vpa-recommender:latest" with ID "sha256:a2febd53e65342043145d2c0b19744b441496369c5097dc02b5fd09b583d8d22" not yet present on node "kind-control-plane", loading...
+make: Entering directory '/home/frla/code/autoscaler-upstream/vertical-pod-autoscaler/pkg/updater'
+docker buildx build --pull --load --platform linux/amd64 --build-arg BUILD_LD_FLAGS="-s" -t localhost:5001/vpa-updater-amd64:latest -f ./Dockerfile ../../
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.19kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/golang:1.24.6
+#2 ...
+
+#3 [internal] load metadata for gcr.io/distroless/static:nonroot
+#3 DONE 0.4s
+
+#2 [internal] load metadata for docker.io/library/golang:1.24.6
+#2 DONE 0.5s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 2B done
+#4 DONE 0.0s
+
+#5 [builder 1/8] FROM docker.io/library/golang:1.24.6@sha256:8d9e57c5a6f2bede16fe674c16149eee20db6907129e02c4ad91ce5a697a4012
+#5 resolve docker.io/library/golang:1.24.6@sha256:8d9e57c5a6f2bede16fe674c16149eee20db6907129e02c4ad91ce5a697a4012 0.0s done
+#5 DONE 0.0s
+
+#6 [stage-1 1/2] FROM gcr.io/distroless/static:nonroot@sha256:e8a4044e0b4ae4257efa45fc026c0bc30ad320d43bd4c1a7d5271bd241e386d0
+#6 resolve gcr.io/distroless/static:nonroot@sha256:e8a4044e0b4ae4257efa45fc026c0bc30ad320d43bd4c1a7d5271bd241e386d0 0.0s done
+#6 DONE 0.0s
+
+#7 [internal] load build context
+#7 transferring context: 22.97kB 0.0s done
+#7 DONE 0.0s
+
+#8 [builder 6/8] COPY common common
+#8 CACHED
+
+#9 [builder 2/8] WORKDIR /workspace
+#9 CACHED
+
+#10 [builder 3/8] COPY go.mod go.mod
+#10 CACHED
+
+#11 [builder 4/8] COPY go.sum go.sum
+#11 CACHED
+
+#12 [builder 5/8] RUN go mod download
+#12 CACHED
+
+#13 [builder 7/8] COPY pkg pkg
+#13 CACHED
+
+#14 [builder 8/8] RUN CGO_ENABLED=0 LD_FLAGS=-s GOARCH=amd64 GOOS=linux go build -C pkg/updater -ldflags="-s" -o updater-amd64
+#14 DONE 32.7s
+
+#15 [stage-1 2/2] COPY --from=builder /workspace/pkg/updater/updater-amd64 /updater
+#15 CACHED
+
+#16 exporting to image
+#16 exporting layers 0.0s done
+#16 exporting manifest sha256:ca50a0a0c3f9682d00de18f988a621385defd6db87e04cfb0b888dbf8b80c4ae done
+#16 exporting config sha256:dd32738d4a438f77856ec97d0bf0a665eba9c86d5132a68a2fd492e39c1abbf4 done
+#16 exporting attestation manifest sha256:76d0d45331c3e367aed51ead99d57678266fbea412a70f1609fa7c83fb98156f 0.0s done
+#16 exporting manifest list sha256:e1a37291975a6967a05a03b85714c502ff8da58217b89353b31cadc575c703af 0.0s done
+#16 naming to localhost:5001/vpa-updater-amd64:latest
+#16 naming to localhost:5001/vpa-updater-amd64:latest done
+#16 unpacking to localhost:5001/vpa-updater-amd64:latest 0.0s done
+#16 DONE 0.2s
+make: Leaving directory '/home/frla/code/autoscaler-upstream/vertical-pod-autoscaler/pkg/updater'
+Image: "localhost:5001/vpa-updater:latest" with ID "sha256:e1a37291975a6967a05a03b85714c502ff8da58217b89353b31cadc575c703af" not yet present on node "kind-control-plane", loading...
+Generating certs for the VPA Admission Controller in /tmp/vpa-certs.
+Certificate request self-signature ok
+subject=CN=vpa-webhook.kube-system.svc
+Uploading certs to the cluster.
+secret/vpa-tls-certs created
+Certificate request self-signature ok
+subject=CN=vpa-webhook.kube-system.svc
+Uploading rotation e2e test certs to the cluster.
+secret/vpa-e2e-certs created
+Deleting /tmp/vpa-certs.
+service/vpa-webhook created
+make: Entering directory '/home/frla/code/autoscaler-upstream/vertical-pod-autoscaler/pkg/admission-controller'
+docker buildx build --pull --load --platform linux/amd64 --build-arg BUILD_LD_FLAGS="-s" -t localhost:5001/vpa-admission-controller-amd64:latest -f ./Dockerfile ../../
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 1.26kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/golang:1.24.6
+#2 ...
+
+#3 [internal] load metadata for gcr.io/distroless/static:nonroot
+#3 DONE 0.4s
+
+#2 [internal] load metadata for docker.io/library/golang:1.24.6
+#2 DONE 0.5s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 2B done
+#4 DONE 0.0s
+
+#5 [stage-1 1/2] FROM gcr.io/distroless/static:nonroot@sha256:e8a4044e0b4ae4257efa45fc026c0bc30ad320d43bd4c1a7d5271bd241e386d0
+#5 resolve gcr.io/distroless/static:nonroot@sha256:e8a4044e0b4ae4257efa45fc026c0bc30ad320d43bd4c1a7d5271bd241e386d0 0.0s done
+#5 DONE 0.0s
+
+#6 [builder 1/8] FROM docker.io/library/golang:1.24.6@sha256:8d9e57c5a6f2bede16fe674c16149eee20db6907129e02c4ad91ce5a697a4012
+#6 resolve docker.io/library/golang:1.24.6@sha256:8d9e57c5a6f2bede16fe674c16149eee20db6907129e02c4ad91ce5a697a4012 0.0s done
+#6 DONE 0.0s
+
+#7 [internal] load build context
+#7 transferring context: 22.97kB 0.0s done
+#7 DONE 0.0s
+
+#8 [builder 4/8] COPY go.sum go.sum
+#8 CACHED
+
+#9 [builder 5/8] RUN go mod download
+#9 CACHED
+
+#10 [builder 6/8] COPY common common
+#10 CACHED
+
+#11 [builder 2/8] WORKDIR /workspace
+#11 CACHED
+
+#12 [builder 3/8] COPY go.mod go.mod
+#12 CACHED
+
+#13 [builder 7/8] COPY pkg pkg
+#13 CACHED
+
+#14 [builder 8/8] RUN CGO_ENABLED=0 GOARCH=amd64 GOOS=linux go build -C pkg/admission-controller -ldflags="-s" -o admission-controller-amd64
+#14 DONE 29.1s
+
+#15 [stage-1 2/2] COPY --from=builder /workspace/pkg/admission-controller/admission-controller-amd64 /admission-controller
+#15 CACHED
+
+#16 exporting to image
+#16 exporting layers 0.0s done
+#16 exporting manifest sha256:7b293476a231e2a333b70f417f467c09594efa5d60f5f4295a548679e53b4606 done
+#16 exporting config sha256:5aaeb72d8bbd16bfa97ef20eb81eda642fea2491c0a8396f112c6deb5bbb74c7 done
+#16 exporting attestation manifest sha256:594e14453f83d6dd7264bbaf9f7c0fdd8a54d4d4173a3fc55343e569afab6f1f 0.0s done
+#16 exporting manifest list sha256:8bac4f8fc2f2d08d05d06b9b5d1d2e935f9e7696ff408614bee27d427742500d done
+#16 naming to localhost:5001/vpa-admission-controller-amd64:latest
+#16 naming to localhost:5001/vpa-admission-controller-amd64:latest done
+#16 unpacking to localhost:5001/vpa-admission-controller-amd64:latest 0.0s done
+#16 DONE 0.1s
+make: Leaving directory '/home/frla/code/autoscaler-upstream/vertical-pod-autoscaler/pkg/admission-controller'
+Image: "localhost:5001/vpa-admission-controller:latest" with ID "sha256:8bac4f8fc2f2d08d05d06b9b5d1d2e935f9e7696ff408614bee27d427742500d" not yet present on node "kind-control-plane", loading...
+WARNING! Using image repository from REGISTRY env variable (localhost:5001) instead of registry.k8s.io/autoscaling.
+WARNING! Using tag from TAG env variable (latest) instead of the default (1.5.0).
+deployment.apps/vpa-recommender created
+WARNING! Using image repository from REGISTRY env variable (localhost:5001) instead of registry.k8s.io/autoscaling.
+WARNING! Using tag from TAG env variable (latest) instead of the default (1.5.0).
+deployment.apps/vpa-updater created
+WARNING! Using image repository from REGISTRY env variable (localhost:5001) instead of registry.k8s.io/autoscaling.
+WARNING! Using tag from TAG env variable (latest) instead of the default (1.5.0).
+deployment.apps/vpa-admission-controller created
+ ** Running Prometheus telemetry E2E tests only
+~/code/autoscaler-upstream/vertical-pod-autoscaler/e2e ~/code/autoscaler-upstream/vertical-pod-autoscaler
+Focusing on tests matching: multiple OOM events across pod restarts
+  I1005 18:12:22.832206 2097767 test_context.go:565] The --provider flag is not set. Continuing as if --provider=skeleton had been used.
+=== RUN   TestE2E
+Running Suite: Kubernetes e2e suite - /home/frla/code/autoscaler-upstream/vertical-pod-autoscaler/e2e/v1
+========================================================================================================
+Random Seed: [1m1759680742[0m
+
+Will run [1m2[0m of [1m461[0m specs
+[38;5;243m------------------------------[0m
+[0m[1m[SynchronizedBeforeSuite] [0m
+[38;5;243m/home/frla/code/autoscaler-upstream/vertical-pod-autoscaler/e2e/v1/e2e.go:67[0m
+  I1005 18:12:22.838419 2097767 util.go:454] >>> kubeConfig: /home/frla/.kube/config
+  I1005 18:12:22.839457 2097767 helper.go:51] Waiting up to 30m0s for all (but 0) nodes to be schedulable
+  I1005 18:12:22.852344 2097767 e2e.go:156] Waiting up to 5m0s for all daemonsets in namespace 'kube-system' to start
+  I1005 18:12:22.855600 2097767 e2e.go:167] 1 / 1 pods ready in namespace 'kube-system' in daemonset 'kindnet' (0 seconds elapsed)
+  I1005 18:12:22.855650 2097767 e2e.go:167] 1 / 1 pods ready in namespace 'kube-system' in daemonset 'kube-proxy' (0 seconds elapsed)
+  I1005 18:12:22.855662 2097767 e2e.go:251] e2e test version: v0.0.0-master+$Format:%H$
+  I1005 18:12:22.856615 2097767 e2e.go:260] kube-apiserver version: v1.33.0
+  I1005 18:12:22.856702 2097767 util.go:454] >>> kubeConfig: /home/frla/.kube/config
+  I1005 18:12:22.860404 2097767 e2e.go:286] Cluster IP family: ipv4
+[38;5;10m[SynchronizedBeforeSuite] PASSED [0.022 seconds][0m
+[38;5;243m------------------------------[0m
+[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m
+[38;5;243m------------------------------[0m
+[0m[sig-autoscaling] [VPA] [full-vpa] [v1] VPA Telemetry Edge Cases [38;5;243mPhase 1: Core Resilience [0m[1mshould support multiple VPAs with different telemetry sources[0m [38;5;204m[PrometheusRequired, EdgeCases][0m
+[38;5;243m/home/frla/code/autoscaler-upstream/vertical-pod-autoscaler/e2e/v1/telemetry_edge_cases.go:170[0m
+  [1mSTEP:[0m Creating a kubernetes client [38;5;243m@ 10/05/25 18:12:22.864[0m
+  I1005 18:12:22.864730 2097767 util.go:454] >>> kubeConfig: /home/frla/.kube/config
+  [1mSTEP:[0m Building a namespace api object, basename vertical-pod-autoscaling-edge-cases [38;5;243m@ 10/05/25 18:12:22.865[0m
+  [1mSTEP:[0m Waiting for a default service account to be provisioned in namespace [38;5;243m@ 10/05/25 18:12:22.879[0m
+  [1mSTEP:[0m Waiting for kube-root-ca.crt to be provisioned in namespace [38;5;243m@ 10/05/25 18:12:22.881[0m
+  [1mSTEP:[0m Setting up three different deployments [38;5;243m@ 10/05/25 18:12:22.883[0m
+  [1mSTEP:[0m Running consuming RC hamster-prom via apps/v1beta2, Kind=Deployment with 2 replicas [38;5;243m@ 10/05/25 18:12:22.883[0m
+  [1mSTEP:[0m creating deployment hamster-prom in namespace vertical-pod-autoscaling-edge-cases-1305 [38;5;243m@ 10/05/25 18:12:22.894[0m
+  I1005 18:12:22.900207 2097767 warnings.go:110] "Warning: would violate PodSecurity \"restricted:latest\": allowPrivilegeEscalation != false (container \"hamster-prom\" must set securityContext.allowPrivilegeEscalation=false), unrestricted capabilities (container \"hamster-prom\" must set securityContext.capabilities.drop=[\"ALL\"]), runAsNonRoot != true (pod or container \"hamster-prom\" must set securityContext.runAsNonRoot=true), seccompProfile (pod or container \"hamster-prom\" must set securityContext.seccompProfile.type to \"RuntimeDefault\" or \"Localhost\")"
+  I1005 18:12:22.900309 2097767 runners.go:194] Created deployment with name: hamster-prom, namespace: vertical-pod-autoscaling-edge-cases-1305, replica count: 2
+  I1005 18:12:32.950446 2097767 runners.go:194] hamster-prom Pods: 2 out of 2 created, 2 running, 0 pending, 0 waiting, 0 inactive, 0 terminating, 0 unknown, 0 runningButNotReady 
+  [1mSTEP:[0m Running controller [38;5;243m@ 10/05/25 18:12:32.95[0m
+  [1mSTEP:[0m creating replication controller hamster-prom-ctrl in namespace vertical-pod-autoscaling-edge-cases-1305 [38;5;243m@ 10/05/25 18:12:32.963[0m
+  I1005 18:12:32.969919 2097767 warnings.go:110] "Warning: would violate PodSecurity \"restricted:latest\": allowPrivilegeEscalation != false (container \"hamster-prom-ctrl\" must set securityContext.allowPrivilegeEscalation=false), unrestricted capabilities (container \"hamster-prom-ctrl\" must set securityContext.capabilities.drop=[\"ALL\"]), runAsNonRoot != true (pod or container \"hamster-prom-ctrl\" must set securityContext.runAsNonRoot=true), seccompProfile (pod or container \"hamster-prom-ctrl\" must set securityContext.seccompProfile.type to \"RuntimeDefault\" or \"Localhost\")"
+  I1005 18:12:32.970002 2097767 runners.go:194] Created replication controller with name: hamster-prom-ctrl, namespace: vertical-pod-autoscaling-edge-cases-1305, replica count: 1
+  I1005 18:12:43.021056 2097767 runners.go:194] hamster-prom-ctrl Pods: 1 out of 1 created, 1 running, 0 pending, 0 waiting, 0 inactive, 0 terminating, 0 unknown, 0 runningButNotReady 
+  I1005 18:12:48.022139 2097767 util.go:419] Waiting for amount of service:hamster-prom-ctrl endpoints to be 1
+  I1005 18:12:48.024778 2097767 autoscaling_utils.go:165] RC hamster-prom: consume 1 millicores in total
+  I1005 18:12:48.024817 2097767 autoscaling_utils.go:190] RC hamster-prom: setting consumption to 1 millicores in total
+  I1005 18:12:48.024827 2097767 autoscaling_utils.go:192] RC hamster-prom: sending request to consume 1 millicores
+  I1005 18:12:48.024875 2097767 autoscaling_utils.go:257] ConsumeCPU URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-prom-ctrl/proxy/ConsumeCPU  false false durationSec=30&millicores=1&requestSizeMillicores=20  }
+  I1005 18:12:48.024953 2097767 autoscaling_utils.go:171] RC hamster-prom: consume 10 MB in total
+  I1005 18:12:48.024984 2097767 autoscaling_utils.go:211] RC hamster-prom: setting consumption to 10 MB in total
+  I1005 18:12:48.024994 2097767 autoscaling_utils.go:213] RC hamster-prom: sending request to consume 10 MB
+  I1005 18:12:48.025028 2097767 autoscaling_utils.go:283] ConsumeMem URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-prom-ctrl/proxy/ConsumeMem  false false durationSec=30&megabytes=10&requestSizeMegabytes=100  }
+  I1005 18:12:48.025065 2097767 autoscaling_utils.go:177] RC hamster-prom: consume custom metric 1 in total
+  I1005 18:12:48.025094 2097767 autoscaling_utils.go:232] RC hamster-prom: setting bump of metric QPS to 1 in total
+  I1005 18:12:48.025102 2097767 autoscaling_utils.go:234] RC hamster-prom: sending request to consume 1 of custom metric QPS
+  I1005 18:12:48.025137 2097767 autoscaling_utils.go:310] ConsumeCustomMetric URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-prom-ctrl/proxy/BumpMetric  false false delta=1&durationSec=30&metric=QPS&requestSizeMetrics=10  }
+  [1mSTEP:[0m Running consuming RC hamster-k8s via apps/v1beta2, Kind=Deployment with 2 replicas [38;5;243m@ 10/05/25 18:12:48.025[0m
+  [1mSTEP:[0m creating deployment hamster-k8s in namespace vertical-pod-autoscaling-edge-cases-1305 [38;5;243m@ 10/05/25 18:12:48.036[0m
+  I1005 18:12:48.042147 2097767 warnings.go:110] "Warning: would violate PodSecurity \"restricted:latest\": allowPrivilegeEscalation != false (container \"hamster-k8s\" must set securityContext.allowPrivilegeEscalation=false), unrestricted capabilities (container \"hamster-k8s\" must set securityContext.capabilities.drop=[\"ALL\"]), runAsNonRoot != true (pod or container \"hamster-k8s\" must set securityContext.runAsNonRoot=true), seccompProfile (pod or container \"hamster-k8s\" must set securityContext.seccompProfile.type to \"RuntimeDefault\" or \"Localhost\")"
+  I1005 18:12:48.042231 2097767 runners.go:194] Created deployment with name: hamster-k8s, namespace: vertical-pod-autoscaling-edge-cases-1305, replica count: 2
+  I1005 18:12:58.093254 2097767 runners.go:194] hamster-k8s Pods: 2 out of 2 created, 2 running, 0 pending, 0 waiting, 0 inactive, 0 terminating, 0 unknown, 0 runningButNotReady 
+  [1mSTEP:[0m Running controller [38;5;243m@ 10/05/25 18:12:58.093[0m
+  [1mSTEP:[0m creating replication controller hamster-k8s-ctrl in namespace vertical-pod-autoscaling-edge-cases-1305 [38;5;243m@ 10/05/25 18:12:58.105[0m
+  I1005 18:12:58.111325 2097767 warnings.go:110] "Warning: would violate PodSecurity \"restricted:latest\": allowPrivilegeEscalation != false (container \"hamster-k8s-ctrl\" must set securityContext.allowPrivilegeEscalation=false), unrestricted capabilities (container \"hamster-k8s-ctrl\" must set securityContext.capabilities.drop=[\"ALL\"]), runAsNonRoot != true (pod or container \"hamster-k8s-ctrl\" must set securityContext.runAsNonRoot=true), seccompProfile (pod or container \"hamster-k8s-ctrl\" must set securityContext.seccompProfile.type to \"RuntimeDefault\" or \"Localhost\")"
+  I1005 18:12:58.111423 2097767 runners.go:194] Created replication controller with name: hamster-k8s-ctrl, namespace: vertical-pod-autoscaling-edge-cases-1305, replica count: 1
+  I1005 18:13:08.161421 2097767 runners.go:194] hamster-k8s-ctrl Pods: 1 out of 1 created, 1 running, 0 pending, 0 waiting, 0 inactive, 0 terminating, 0 unknown, 0 runningButNotReady 
+  I1005 18:13:13.162539 2097767 util.go:419] Waiting for amount of service:hamster-k8s-ctrl endpoints to be 1
+  I1005 18:13:13.165446 2097767 autoscaling_utils.go:165] RC hamster-k8s: consume 1 millicores in total
+  I1005 18:13:13.165484 2097767 autoscaling_utils.go:190] RC hamster-k8s: setting consumption to 1 millicores in total
+  I1005 18:13:13.165517 2097767 autoscaling_utils.go:192] RC hamster-k8s: sending request to consume 1 millicores
+  I1005 18:13:13.165558 2097767 autoscaling_utils.go:257] ConsumeCPU URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-k8s-ctrl/proxy/ConsumeCPU  false false durationSec=30&millicores=1&requestSizeMillicores=20  }
+  I1005 18:13:13.165588 2097767 autoscaling_utils.go:171] RC hamster-k8s: consume 10 MB in total
+  I1005 18:13:13.165620 2097767 autoscaling_utils.go:211] RC hamster-k8s: setting consumption to 10 MB in total
+  I1005 18:13:13.165629 2097767 autoscaling_utils.go:213] RC hamster-k8s: sending request to consume 10 MB
+  I1005 18:13:13.165659 2097767 autoscaling_utils.go:283] ConsumeMem URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-k8s-ctrl/proxy/ConsumeMem  false false durationSec=30&megabytes=10&requestSizeMegabytes=100  }
+  I1005 18:13:13.165681 2097767 autoscaling_utils.go:177] RC hamster-k8s: consume custom metric 1 in total
+  I1005 18:13:13.165697 2097767 autoscaling_utils.go:234] RC hamster-k8s: sending request to consume 0 of custom metric QPS
+  I1005 18:13:13.165745 2097767 autoscaling_utils.go:310] ConsumeCustomMetric URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-k8s-ctrl/proxy/BumpMetric  false false delta=0&durationSec=30&metric=QPS&requestSizeMetrics=10  }
+  I1005 18:13:13.168467 2097767 autoscaling_utils.go:232] RC hamster-k8s: setting bump of metric QPS to 1 in total
+  [1mSTEP:[0m Running consuming RC hamster-custom via apps/v1beta2, Kind=Deployment with 2 replicas [38;5;243m@ 10/05/25 18:13:13.168[0m
+  [1mSTEP:[0m creating deployment hamster-custom in namespace vertical-pod-autoscaling-edge-cases-1305 [38;5;243m@ 10/05/25 18:13:13.18[0m
+  I1005 18:13:13.185599 2097767 warnings.go:110] "Warning: would violate PodSecurity \"restricted:latest\": allowPrivilegeEscalation != false (container \"hamster-custom\" must set securityContext.allowPrivilegeEscalation=false), unrestricted capabilities (container \"hamster-custom\" must set securityContext.capabilities.drop=[\"ALL\"]), runAsNonRoot != true (pod or container \"hamster-custom\" must set securityContext.runAsNonRoot=true), seccompProfile (pod or container \"hamster-custom\" must set securityContext.seccompProfile.type to \"RuntimeDefault\" or \"Localhost\")"
+  I1005 18:13:13.185796 2097767 runners.go:194] Created deployment with name: hamster-custom, namespace: vertical-pod-autoscaling-edge-cases-1305, replica count: 2
+  I1005 18:13:18.031238 2097767 autoscaling_utils.go:234] RC hamster-prom: sending request to consume 1 of custom metric QPS
+  I1005 18:13:18.031251 2097767 autoscaling_utils.go:213] RC hamster-prom: sending request to consume 10 MB
+  I1005 18:13:18.031359 2097767 autoscaling_utils.go:283] ConsumeMem URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-prom-ctrl/proxy/ConsumeMem  false false durationSec=30&megabytes=10&requestSizeMegabytes=100  }
+  I1005 18:13:18.031272 2097767 autoscaling_utils.go:192] RC hamster-prom: sending request to consume 1 millicores
+  I1005 18:13:18.031481 2097767 autoscaling_utils.go:257] ConsumeCPU URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-prom-ctrl/proxy/ConsumeCPU  false false durationSec=30&millicores=1&requestSizeMillicores=20  }
+  I1005 18:13:18.031517 2097767 autoscaling_utils.go:310] ConsumeCustomMetric URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-prom-ctrl/proxy/BumpMetric  false false delta=1&durationSec=30&metric=QPS&requestSizeMetrics=10  }
+  I1005 18:13:23.237569 2097767 runners.go:194] hamster-custom Pods: 2 out of 2 created, 2 running, 0 pending, 0 waiting, 0 inactive, 0 terminating, 0 unknown, 0 runningButNotReady 
+  [1mSTEP:[0m Running controller [38;5;243m@ 10/05/25 18:13:23.237[0m
+  [1mSTEP:[0m creating replication controller hamster-custom-ctrl in namespace vertical-pod-autoscaling-edge-cases-1305 [38;5;243m@ 10/05/25 18:13:23.248[0m
+  I1005 18:13:23.252498 2097767 warnings.go:110] "Warning: would violate PodSecurity \"restricted:latest\": allowPrivilegeEscalation != false (container \"hamster-custom-ctrl\" must set securityContext.allowPrivilegeEscalation=false), unrestricted capabilities (container \"hamster-custom-ctrl\" must set securityContext.capabilities.drop=[\"ALL\"]), runAsNonRoot != true (pod or container \"hamster-custom-ctrl\" must set securityContext.runAsNonRoot=true), seccompProfile (pod or container \"hamster-custom-ctrl\" must set securityContext.seccompProfile.type to \"RuntimeDefault\" or \"Localhost\")"
+  I1005 18:13:23.252650 2097767 runners.go:194] Created replication controller with name: hamster-custom-ctrl, namespace: vertical-pod-autoscaling-edge-cases-1305, replica count: 1
+  I1005 18:13:33.301956 2097767 runners.go:194] hamster-custom-ctrl Pods: 1 out of 1 created, 1 running, 0 pending, 0 waiting, 0 inactive, 0 terminating, 0 unknown, 0 runningButNotReady 
+  I1005 18:13:38.302546 2097767 util.go:419] Waiting for amount of service:hamster-custom-ctrl endpoints to be 1
+  I1005 18:13:38.304926 2097767 autoscaling_utils.go:165] RC hamster-custom: consume 1 millicores in total
+  I1005 18:13:38.304967 2097767 autoscaling_utils.go:190] RC hamster-custom: setting consumption to 1 millicores in total
+  I1005 18:13:38.304978 2097767 autoscaling_utils.go:192] RC hamster-custom: sending request to consume 1 millicores
+  I1005 18:13:38.305011 2097767 autoscaling_utils.go:257] ConsumeCPU URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-custom-ctrl/proxy/ConsumeCPU  false false durationSec=30&millicores=1&requestSizeMillicores=20  }
+  I1005 18:13:38.305134 2097767 autoscaling_utils.go:171] RC hamster-custom: consume 10 MB in total
+  I1005 18:13:38.305153 2097767 autoscaling_utils.go:213] RC hamster-custom: sending request to consume 0 MB
+  I1005 18:13:38.305169 2097767 autoscaling_utils.go:283] ConsumeMem URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-custom-ctrl/proxy/ConsumeMem  false false durationSec=30&megabytes=0&requestSizeMegabytes=100  }
+  I1005 18:13:38.310710 2097767 autoscaling_utils.go:211] RC hamster-custom: setting consumption to 10 MB in total
+  I1005 18:13:38.310745 2097767 autoscaling_utils.go:177] RC hamster-custom: consume custom metric 1 in total
+  I1005 18:13:38.310756 2097767 autoscaling_utils.go:234] RC hamster-custom: sending request to consume 0 of custom metric QPS
+  I1005 18:13:38.310800 2097767 autoscaling_utils.go:310] ConsumeCustomMetric URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-custom-ctrl/proxy/BumpMetric  false false delta=0&durationSec=30&metric=QPS&requestSizeMetrics=10  }
+  I1005 18:13:38.313575 2097767 autoscaling_utils.go:232] RC hamster-custom: setting bump of metric QPS to 1 in total
+  [1mSTEP:[0m Creating VPA 1 with Prometheus telemetry [38;5;243m@ 10/05/25 18:13:38.313[0m
+  I1005 18:13:38.313638 2097767 util.go:454] >>> kubeConfig: /home/frla/.kube/config
+  I1005 18:13:38.324763 2097767 util.go:454] >>> kubeConfig: /home/frla/.kube/config
+  [1mSTEP:[0m Creating VPA 2 with default Kubernetes telemetry [38;5;243m@ 10/05/25 18:13:38.329[0m
+  I1005 18:13:38.329136 2097767 util.go:454] >>> kubeConfig: /home/frla/.kube/config
+  I1005 18:13:38.333807 2097767 util.go:454] >>> kubeConfig: /home/frla/.kube/config
+  [1mSTEP:[0m Creating VPA 3 with Prometheus and custom OOM query [38;5;243m@ 10/05/25 18:13:38.339[0m
+  I1005 18:13:38.339668 2097767 util.go:454] >>> kubeConfig: /home/frla/.kube/config
+  I1005 18:13:38.345962 2097767 util.go:454] >>> kubeConfig: /home/frla/.kube/config
+  [1mSTEP:[0m Waiting for all VPAs to get recommendations [38;5;243m@ 10/05/25 18:13:38.35[0m
+  I1005 18:13:38.350868 2097767 telemetry_edge_cases.go:283] Waiting for recommendations from VPA: hamster-prom-vpa
+  I1005 18:13:38.350894 2097767 util.go:454] >>> kubeConfig: /home/frla/.kube/config
+  I1005 18:13:38.354206 2097767 telemetry_edge_cases.go:297] VPA hamster-prom-vpa waiting for recommendations...
+  I1005 18:13:43.166908 2097767 autoscaling_utils.go:234] RC hamster-k8s: sending request to consume 1 of custom metric QPS
+  I1005 18:13:43.167074 2097767 autoscaling_utils.go:310] ConsumeCustomMetric URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-k8s-ctrl/proxy/BumpMetric  false false delta=1&durationSec=30&metric=QPS&requestSizeMetrics=10  }
+  I1005 18:13:43.170148 2097767 autoscaling_utils.go:192] RC hamster-k8s: sending request to consume 1 millicores
+  I1005 18:13:43.170267 2097767 autoscaling_utils.go:257] ConsumeCPU URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-k8s-ctrl/proxy/ConsumeCPU  false false durationSec=30&millicores=1&requestSizeMillicores=20  }
+  I1005 18:13:43.170172 2097767 autoscaling_utils.go:213] RC hamster-k8s: sending request to consume 10 MB
+  I1005 18:13:43.170408 2097767 autoscaling_utils.go:283] ConsumeMem URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-k8s-ctrl/proxy/ConsumeMem  false false durationSec=30&megabytes=10&requestSizeMegabytes=100  }
+  I1005 18:13:48.036773 2097767 autoscaling_utils.go:234] RC hamster-prom: sending request to consume 1 of custom metric QPS
+  I1005 18:13:48.036860 2097767 autoscaling_utils.go:192] RC hamster-prom: sending request to consume 1 millicores
+  I1005 18:13:48.036888 2097767 autoscaling_utils.go:310] ConsumeCustomMetric URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-prom-ctrl/proxy/BumpMetric  false false delta=1&durationSec=30&metric=QPS&requestSizeMetrics=10  }
+  I1005 18:13:48.036932 2097767 autoscaling_utils.go:257] ConsumeCPU URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-prom-ctrl/proxy/ConsumeCPU  false false durationSec=30&millicores=1&requestSizeMillicores=20  }
+  I1005 18:13:48.036990 2097767 autoscaling_utils.go:213] RC hamster-prom: sending request to consume 10 MB
+  I1005 18:13:48.037025 2097767 autoscaling_utils.go:283] ConsumeMem URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-prom-ctrl/proxy/ConsumeMem  false false durationSec=30&megabytes=10&requestSizeMegabytes=100  }
+  I1005 18:13:48.351043 2097767 util.go:454] >>> kubeConfig: /home/frla/.kube/config
+  I1005 18:13:48.354059 2097767 telemetry_edge_cases.go:297] VPA hamster-prom-vpa waiting for recommendations...
+  I1005 18:13:58.351881 2097767 util.go:454] >>> kubeConfig: /home/frla/.kube/config
+  I1005 18:13:58.355127 2097767 telemetry_edge_cases.go:297] VPA hamster-prom-vpa waiting for recommendations...
+  I1005 18:14:08.309560 2097767 autoscaling_utils.go:192] RC hamster-custom: sending request to consume 1 millicores
+  I1005 18:14:08.309727 2097767 autoscaling_utils.go:257] ConsumeCPU URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-custom-ctrl/proxy/ConsumeCPU  false false durationSec=30&millicores=1&requestSizeMillicores=20  }
+  I1005 18:14:08.309940 2097767 autoscaling_utils.go:213] RC hamster-custom: sending request to consume 10 MB
+  I1005 18:14:08.310000 2097767 autoscaling_utils.go:283] ConsumeMem URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-custom-ctrl/proxy/ConsumeMem  false false durationSec=30&megabytes=10&requestSizeMegabytes=100  }
+  I1005 18:14:08.313010 2097767 autoscaling_utils.go:234] RC hamster-custom: sending request to consume 1 of custom metric QPS
+  I1005 18:14:08.313129 2097767 autoscaling_utils.go:310] ConsumeCustomMetric URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-custom-ctrl/proxy/BumpMetric  false false delta=1&durationSec=30&metric=QPS&requestSizeMetrics=10  }
+  I1005 18:14:08.349826 2097767 util.go:454] >>> kubeConfig: /home/frla/.kube/config
+  I1005 18:14:08.352668 2097767 telemetry_edge_cases.go:297] VPA hamster-prom-vpa waiting for recommendations...
+  I1005 18:14:13.172462 2097767 autoscaling_utils.go:234] RC hamster-k8s: sending request to consume 1 of custom metric QPS
+  I1005 18:14:13.172580 2097767 autoscaling_utils.go:310] ConsumeCustomMetric URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-k8s-ctrl/proxy/BumpMetric  false false delta=1&durationSec=30&metric=QPS&requestSizeMetrics=10  }
+  I1005 18:14:13.174759 2097767 autoscaling_utils.go:213] RC hamster-k8s: sending request to consume 10 MB
+  I1005 18:14:13.174859 2097767 autoscaling_utils.go:192] RC hamster-k8s: sending request to consume 1 millicores
+  I1005 18:14:13.175000 2097767 autoscaling_utils.go:257] ConsumeCPU URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-k8s-ctrl/proxy/ConsumeCPU  false false durationSec=30&millicores=1&requestSizeMillicores=20  }
+  I1005 18:14:13.174891 2097767 autoscaling_utils.go:283] ConsumeMem URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-k8s-ctrl/proxy/ConsumeMem  false false durationSec=30&megabytes=10&requestSizeMegabytes=100  }
+  I1005 18:14:18.042255 2097767 autoscaling_utils.go:192] RC hamster-prom: sending request to consume 1 millicores
+  I1005 18:14:18.042346 2097767 autoscaling_utils.go:213] RC hamster-prom: sending request to consume 10 MB
+  I1005 18:14:18.042432 2097767 autoscaling_utils.go:283] ConsumeMem URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-prom-ctrl/proxy/ConsumeMem  false false durationSec=30&megabytes=10&requestSizeMegabytes=100  }
+  I1005 18:14:18.042356 2097767 autoscaling_utils.go:257] ConsumeCPU URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-prom-ctrl/proxy/ConsumeCPU  false false durationSec=30&millicores=1&requestSizeMillicores=20  }
+  I1005 18:14:18.042283 2097767 autoscaling_utils.go:234] RC hamster-prom: sending request to consume 1 of custom metric QPS
+  I1005 18:14:18.042596 2097767 autoscaling_utils.go:310] ConsumeCustomMetric URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-prom-ctrl/proxy/BumpMetric  false false delta=1&durationSec=30&metric=QPS&requestSizeMetrics=10  }
+  I1005 18:14:18.349914 2097767 util.go:454] >>> kubeConfig: /home/frla/.kube/config
+  I1005 18:14:18.352675 2097767 telemetry_edge_cases.go:297] VPA hamster-prom-vpa waiting for recommendations...
+  I1005 18:14:28.350728 2097767 util.go:454] >>> kubeConfig: /home/frla/.kube/config
+  I1005 18:14:28.356417 2097767 telemetry_edge_cases.go:293] VPA hamster-prom-vpa has recommendations
+  I1005 18:14:28.356492 2097767 telemetry_edge_cases.go:283] Waiting for recommendations from VPA: hamster-k8s-vpa
+  I1005 18:14:28.356525 2097767 util.go:454] >>> kubeConfig: /home/frla/.kube/config
+  I1005 18:14:28.359434 2097767 telemetry_edge_cases.go:293] VPA hamster-k8s-vpa has recommendations
+  I1005 18:14:28.359487 2097767 telemetry_edge_cases.go:283] Waiting for recommendations from VPA: hamster-custom-vpa
+  I1005 18:14:28.359516 2097767 util.go:454] >>> kubeConfig: /home/frla/.kube/config
+  I1005 18:14:28.362038 2097767 telemetry_edge_cases.go:293] VPA hamster-custom-vpa has recommendations
+  [1mSTEP:[0m Verifying all VPAs have independent recommendations [38;5;243m@ 10/05/25 18:14:28.362[0m
+  I1005 18:14:28.362097 2097767 util.go:454] >>> kubeConfig: /home/frla/.kube/config
+  I1005 18:14:28.364324 2097767 util.go:454] >>> kubeConfig: /home/frla/.kube/config
+  I1005 18:14:28.366556 2097767 util.go:454] >>> kubeConfig: /home/frla/.kube/config
+  I1005 18:14:28.368488 2097767 telemetry_edge_cases.go:333] VPA 1 (Prometheus): CPU={{25 -3} {<nil>} 25m DecimalSI}, Memory={{262144000 0} {<nil>} 250Mi BinarySI}
+  I1005 18:14:28.368520 2097767 telemetry_edge_cases.go:336] VPA 2 (Kubernetes): CPU={{25 -3} {<nil>} 25m DecimalSI}, Memory={{262144000 0} {<nil>} 250Mi BinarySI}
+  I1005 18:14:28.368527 2097767 telemetry_edge_cases.go:339] VPA 3 (Prometheus+Custom): CPU={{25 -3} {<nil>} 25m DecimalSI}, Memory={{262144000 0} {<nil>} 250Mi BinarySI}
+  [1mSTEP:[0m Verifying telemetry metrics show healthy status for working VPAs [38;5;243m@ 10/05/25 18:14:28.368[0m
+  I1005 18:14:28.378437 2097767 telemetry_edge_cases.go:351] VPA 1 telemetry_status correctly set to 0 (ok)
+  I1005 18:14:28.389155 2097767 telemetry_edge_cases.go:361] VPA 3 telemetry_status correctly set to 0 (ok)
+  I1005 18:14:28.389202 2097767 telemetry_edge_cases.go:365] VPA 2 uses Kubernetes metrics-server (no Prometheus telemetry metrics)
+  [1mSTEP:[0m Removing consuming RC hamster-custom [38;5;243m@ 10/05/25 18:14:28.389[0m
+  I1005 18:14:28.389261 2097767 autoscaling_utils.go:238] RC hamster-custom: stopping metric consumer
+  I1005 18:14:28.389269 2097767 autoscaling_utils.go:217] RC hamster-custom: stopping mem consumer
+  I1005 18:14:28.389289 2097767 autoscaling_utils.go:196] RC hamster-custom: stopping CPU consumer
+  [1mSTEP:[0m deleting Deployment.apps hamster-custom in namespace vertical-pod-autoscaling-edge-cases-1305, will wait for the garbage collector to delete the pods [38;5;243m@ 10/05/25 18:14:38.387[0m
+  I1005 18:14:38.445601 2097767 resources.go:139] Deleting Deployment.apps hamster-custom took: 5.084183ms
+  I1005 18:14:38.546114 2097767 resources.go:163] Terminating Deployment.apps hamster-custom pods took: 100.506624ms
+  [1mSTEP:[0m deleting ReplicationController hamster-custom-ctrl in namespace vertical-pod-autoscaling-edge-cases-1305, will wait for the garbage collector to delete the pods [38;5;243m@ 10/05/25 18:14:39.46[0m
+  I1005 18:14:39.516866 2097767 resources.go:139] Deleting ReplicationController hamster-custom-ctrl took: 3.959863ms
+  I1005 18:14:39.617865 2097767 resources.go:163] Terminating ReplicationController hamster-custom-ctrl pods took: 100.997441ms
+  [1mSTEP:[0m Removing consuming RC hamster-k8s [38;5;243m@ 10/05/25 18:14:40.431[0m
+  I1005 18:14:40.431185 2097767 autoscaling_utils.go:238] RC hamster-k8s: stopping metric consumer
+  I1005 18:14:40.431200 2097767 autoscaling_utils.go:217] RC hamster-k8s: stopping mem consumer
+  I1005 18:14:40.431211 2097767 autoscaling_utils.go:196] RC hamster-k8s: stopping CPU consumer
+  I1005 18:14:48.047366 2097767 autoscaling_utils.go:234] RC hamster-prom: sending request to consume 1 of custom metric QPS
+  I1005 18:14:48.047436 2097767 autoscaling_utils.go:192] RC hamster-prom: sending request to consume 1 millicores
+  I1005 18:14:48.047458 2097767 autoscaling_utils.go:213] RC hamster-prom: sending request to consume 10 MB
+  I1005 18:14:48.047479 2097767 autoscaling_utils.go:310] ConsumeCustomMetric URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-prom-ctrl/proxy/BumpMetric  false false delta=1&durationSec=30&metric=QPS&requestSizeMetrics=10  }
+  I1005 18:14:48.047502 2097767 autoscaling_utils.go:283] ConsumeMem URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-prom-ctrl/proxy/ConsumeMem  false false durationSec=30&megabytes=10&requestSizeMegabytes=100  }
+  I1005 18:14:48.047501 2097767 autoscaling_utils.go:257] ConsumeCPU URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1305/services/hamster-prom-ctrl/proxy/ConsumeCPU  false false durationSec=30&millicores=1&requestSizeMillicores=20  }
+  [1mSTEP:[0m deleting Deployment.apps hamster-k8s in namespace vertical-pod-autoscaling-edge-cases-1305, will wait for the garbage collector to delete the pods [38;5;243m@ 10/05/25 18:14:50.433[0m
+  I1005 18:14:50.491179 2097767 resources.go:139] Deleting Deployment.apps hamster-k8s took: 4.243806ms
+  I1005 18:14:50.591804 2097767 resources.go:163] Terminating Deployment.apps hamster-k8s pods took: 100.622448ms
+  [1mSTEP:[0m deleting ReplicationController hamster-k8s-ctrl in namespace vertical-pod-autoscaling-edge-cases-1305, will wait for the garbage collector to delete the pods [38;5;243m@ 10/05/25 18:14:51.505[0m
+  I1005 18:14:51.560765 2097767 resources.go:139] Deleting ReplicationController hamster-k8s-ctrl took: 3.629967ms
+  I1005 18:14:51.661488 2097767 resources.go:163] Terminating ReplicationController hamster-k8s-ctrl pods took: 100.695453ms
+  [1mSTEP:[0m Removing consuming RC hamster-prom [38;5;243m@ 10/05/25 18:14:52.474[0m
+  I1005 18:14:52.474989 2097767 autoscaling_utils.go:238] RC hamster-prom: stopping metric consumer
+  I1005 18:14:52.475003 2097767 autoscaling_utils.go:217] RC hamster-prom: stopping mem consumer
+  I1005 18:14:52.475014 2097767 autoscaling_utils.go:196] RC hamster-prom: stopping CPU consumer
+  [1mSTEP:[0m deleting Deployment.apps hamster-prom in namespace vertical-pod-autoscaling-edge-cases-1305, will wait for the garbage collector to delete the pods [38;5;243m@ 10/05/25 18:15:02.476[0m
+  I1005 18:15:02.534206 2097767 resources.go:139] Deleting Deployment.apps hamster-prom took: 3.695973ms
+  I1005 18:15:02.634694 2097767 resources.go:163] Terminating Deployment.apps hamster-prom pods took: 100.484976ms
+  [1mSTEP:[0m deleting ReplicationController hamster-prom-ctrl in namespace vertical-pod-autoscaling-edge-cases-1305, will wait for the garbage collector to delete the pods [38;5;243m@ 10/05/25 18:15:03.556[0m
+  I1005 18:15:03.614935 2097767 resources.go:139] Deleting ReplicationController hamster-prom-ctrl took: 4.827293ms
+  I1005 18:15:03.715558 2097767 resources.go:163] Terminating ReplicationController hamster-prom-ctrl pods took: 100.621724ms
+  [1mSTEP:[0m Destroying namespace "vertical-pod-autoscaling-edge-cases-1305" for this suite. [38;5;243m@ 10/05/25 18:15:04.531[0m
+[38;5;10m• [161.681 seconds][0m
+[38;5;243m------------------------------[0m
+[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m[38;5;14mS[0m
+[38;5;243m------------------------------[0m
+[0m[sig-autoscaling] [VPA] [full-vpa] [v1] VPA Telemetry Edge Cases [38;5;243mPhase 3: Advanced Scenarios [0m[1mshould handle multiple OOM events across pod restarts[0m [38;5;204m[PrometheusRequired, EdgeCases][0m
+[38;5;243m/home/frla/code/autoscaler-upstream/vertical-pod-autoscaler/e2e/v1/telemetry_edge_cases.go:709[0m
+  [1mSTEP:[0m Creating a kubernetes client [38;5;243m@ 10/05/25 18:15:04.537[0m
+  I1005 18:15:04.537125 2097767 util.go:454] >>> kubeConfig: /home/frla/.kube/config
+  [1mSTEP:[0m Building a namespace api object, basename vertical-pod-autoscaling-edge-cases [38;5;243m@ 10/05/25 18:15:04.537[0m
+  [1mSTEP:[0m Waiting for a default service account to be provisioned in namespace [38;5;243m@ 10/05/25 18:15:04.546[0m
+  [1mSTEP:[0m Waiting for kube-root-ca.crt to be provisioned in namespace [38;5;243m@ 10/05/25 18:15:04.548[0m
+  [1mSTEP:[0m Setting up a hamster deployment with low memory to trigger OOMs [38;5;243m@ 10/05/25 18:15:04.55[0m
+  [1mSTEP:[0m Running consuming RC hamster-oom-restart via apps/v1beta2, Kind=Deployment with 2 replicas [38;5;243m@ 10/05/25 18:15:04.55[0m
+  [1mSTEP:[0m creating deployment hamster-oom-restart in namespace vertical-pod-autoscaling-edge-cases-1333 [38;5;243m@ 10/05/25 18:15:04.561[0m
+  I1005 18:15:04.566307 2097767 warnings.go:110] "Warning: would violate PodSecurity \"restricted:latest\": allowPrivilegeEscalation != false (container \"hamster-oom-restart\" must set securityContext.allowPrivilegeEscalation=false), unrestricted capabilities (container \"hamster-oom-restart\" must set securityContext.capabilities.drop=[\"ALL\"]), runAsNonRoot != true (pod or container \"hamster-oom-restart\" must set securityContext.runAsNonRoot=true), seccompProfile (pod or container \"hamster-oom-restart\" must set securityContext.seccompProfile.type to \"RuntimeDefault\" or \"Localhost\")"
+  I1005 18:15:04.566393 2097767 runners.go:194] Created deployment with name: hamster-oom-restart, namespace: vertical-pod-autoscaling-edge-cases-1333, replica count: 2
+  I1005 18:15:14.618701 2097767 runners.go:194] hamster-oom-restart Pods: 2 out of 2 created, 2 running, 0 pending, 0 waiting, 0 inactive, 0 terminating, 0 unknown, 0 runningButNotReady 
+  [1mSTEP:[0m Running controller [38;5;243m@ 10/05/25 18:15:14.618[0m
+  [1mSTEP:[0m creating replication controller hamster-oom-restart-ctrl in namespace vertical-pod-autoscaling-edge-cases-1333 [38;5;243m@ 10/05/25 18:15:14.63[0m
+  I1005 18:15:14.635732 2097767 warnings.go:110] "Warning: would violate PodSecurity \"restricted:latest\": allowPrivilegeEscalation != false (container \"hamster-oom-restart-ctrl\" must set securityContext.allowPrivilegeEscalation=false), unrestricted capabilities (container \"hamster-oom-restart-ctrl\" must set securityContext.capabilities.drop=[\"ALL\"]), runAsNonRoot != true (pod or container \"hamster-oom-restart-ctrl\" must set securityContext.runAsNonRoot=true), seccompProfile (pod or container \"hamster-oom-restart-ctrl\" must set securityContext.seccompProfile.type to \"RuntimeDefault\" or \"Localhost\")"
+  I1005 18:15:14.635807 2097767 runners.go:194] Created replication controller with name: hamster-oom-restart-ctrl, namespace: vertical-pod-autoscaling-edge-cases-1333, replica count: 1
+  I1005 18:15:24.687862 2097767 runners.go:194] hamster-oom-restart-ctrl Pods: 1 out of 1 created, 1 running, 0 pending, 0 waiting, 0 inactive, 0 terminating, 0 unknown, 0 runningButNotReady 
+  I1005 18:15:29.687782 2097767 util.go:419] Waiting for amount of service:hamster-oom-restart-ctrl endpoints to be 1
+  I1005 18:15:29.690593 2097767 autoscaling_utils.go:165] RC hamster-oom-restart: consume 1 millicores in total
+  I1005 18:15:29.690630 2097767 autoscaling_utils.go:192] RC hamster-oom-restart: sending request to consume 0 millicores
+  I1005 18:15:29.690696 2097767 autoscaling_utils.go:257] ConsumeCPU URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1333/services/hamster-oom-restart-ctrl/proxy/ConsumeCPU  false false durationSec=30&millicores=0&requestSizeMillicores=20  }
+  I1005 18:15:29.693245 2097767 autoscaling_utils.go:190] RC hamster-oom-restart: setting consumption to 1 millicores in total
+  I1005 18:15:29.693277 2097767 autoscaling_utils.go:171] RC hamster-oom-restart: consume 10 MB in total
+  I1005 18:15:29.693290 2097767 autoscaling_utils.go:211] RC hamster-oom-restart: setting consumption to 10 MB in total
+  I1005 18:15:29.693298 2097767 autoscaling_utils.go:213] RC hamster-oom-restart: sending request to consume 10 MB
+  I1005 18:15:29.693322 2097767 autoscaling_utils.go:283] ConsumeMem URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1333/services/hamster-oom-restart-ctrl/proxy/ConsumeMem  false false durationSec=30&megabytes=10&requestSizeMegabytes=100  }
+  I1005 18:15:29.693436 2097767 autoscaling_utils.go:177] RC hamster-oom-restart: consume custom metric 1 in total
+  I1005 18:15:29.693491 2097767 autoscaling_utils.go:232] RC hamster-oom-restart: setting bump of metric QPS to 1 in total
+  I1005 18:15:29.693508 2097767 autoscaling_utils.go:234] RC hamster-oom-restart: sending request to consume 1 of custom metric QPS
+  I1005 18:15:29.693561 2097767 autoscaling_utils.go:310] ConsumeCustomMetric URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1333/services/hamster-oom-restart-ctrl/proxy/BumpMetric  false false delta=1&durationSec=30&metric=QPS&requestSizeMetrics=10  }
+  [1mSTEP:[0m Creating VPA with Prometheus OOM counter query [38;5;243m@ 10/05/25 18:15:29.693[0m
+  I1005 18:15:29.693706 2097767 util.go:454] >>> kubeConfig: /home/frla/.kube/config
+  I1005 18:15:29.703377 2097767 util.go:454] >>> kubeConfig: /home/frla/.kube/config
+  [1mSTEP:[0m Waiting for initial VPA recommendation [38;5;243m@ 10/05/25 18:15:29.707[0m
+  I1005 18:15:59.692592 2097767 autoscaling_utils.go:192] RC hamster-oom-restart: sending request to consume 1 millicores
+  I1005 18:15:59.692688 2097767 autoscaling_utils.go:257] ConsumeCPU URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1333/services/hamster-oom-restart-ctrl/proxy/ConsumeCPU  false false durationSec=30&millicores=1&requestSizeMillicores=20  }
+  I1005 18:15:59.696843 2097767 autoscaling_utils.go:213] RC hamster-oom-restart: sending request to consume 10 MB
+  I1005 18:15:59.696888 2097767 autoscaling_utils.go:234] RC hamster-oom-restart: sending request to consume 1 of custom metric QPS
+  I1005 18:15:59.696929 2097767 autoscaling_utils.go:283] ConsumeMem URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1333/services/hamster-oom-restart-ctrl/proxy/ConsumeMem  false false durationSec=30&megabytes=10&requestSizeMegabytes=100  }
+  I1005 18:15:59.696940 2097767 autoscaling_utils.go:310] ConsumeCustomMetric URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1333/services/hamster-oom-restart-ctrl/proxy/BumpMetric  false false delta=1&durationSec=30&metric=QPS&requestSizeMetrics=10  }
+  I1005 18:16:29.697628 2097767 autoscaling_utils.go:192] RC hamster-oom-restart: sending request to consume 1 millicores
+  I1005 18:16:29.697750 2097767 autoscaling_utils.go:257] ConsumeCPU URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1333/services/hamster-oom-restart-ctrl/proxy/ConsumeCPU  false false durationSec=30&millicores=1&requestSizeMillicores=20  }
+  I1005 18:16:29.702026 2097767 autoscaling_utils.go:234] RC hamster-oom-restart: sending request to consume 1 of custom metric QPS
+  I1005 18:16:29.702132 2097767 autoscaling_utils.go:310] ConsumeCustomMetric URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1333/services/hamster-oom-restart-ctrl/proxy/BumpMetric  false false delta=1&durationSec=30&metric=QPS&requestSizeMetrics=10  }
+  I1005 18:16:29.701994 2097767 autoscaling_utils.go:213] RC hamster-oom-restart: sending request to consume 10 MB
+  I1005 18:16:29.702358 2097767 autoscaling_utils.go:283] ConsumeMem URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1333/services/hamster-oom-restart-ctrl/proxy/ConsumeMem  false false durationSec=30&megabytes=10&requestSizeMegabytes=100  }
+  I1005 18:16:39.705796 2097767 util.go:454] >>> kubeConfig: /home/frla/.kube/config
+  [1mSTEP:[0m Getting pod names for first generation [38;5;243m@ 10/05/25 18:16:39.709[0m
+  I1005 18:16:39.711457 2097767 telemetry_edge_cases.go:774] Generation 1 pods: hamster-oom-restart-6fd8ddd6c8-fwsxv, hamster-oom-restart-6fd8ddd6c8-zt2gp
+  [1mSTEP:[0m Pushing baseline OOM counter (0) for both first-gen pods [38;5;243m@ 10/05/25 18:16:39.711[0m
+  I1005 18:16:39.711510 2097767 pushgateway_utils.go:84] Pushing metric to Pushgateway service: pushgateway (path: metrics/job/e2e-test-oom/instance/hamster-oom-restart-6fd8ddd6c8-fwsxv)
+  I1005 18:16:39.711517 2097767 pushgateway_utils.go:85] Metric data:
+  # HELP e2e_test_oom_events_total Fake metric for E2E testing
+  # TYPE e2e_test_oom_events_total counter
+  e2e_test_oom_events_total{pod="hamster-oom-restart-6fd8ddd6c8-fwsxv",container="hamster",instance="hamster-oom-restart-6fd8ddd6c8-fwsxv",job="e2e-test-oom",namespace="vertical-pod-autoscaling-edge-cases-1333"} 0
+
+  I1005 18:16:39.715826 2097767 pushgateway_utils.go:113] Successfully pushed metric to Pushgateway: 
+  I1005 18:16:39.715887 2097767 pushgateway_utils.go:84] Pushing metric to Pushgateway service: pushgateway (path: metrics/job/e2e-test-oom/instance/hamster-oom-restart-6fd8ddd6c8-zt2gp)
+  I1005 18:16:39.715893 2097767 pushgateway_utils.go:85] Metric data:
+  # HELP e2e_test_oom_events_total Fake metric for E2E testing
+  # TYPE e2e_test_oom_events_total counter
+  e2e_test_oom_events_total{pod="hamster-oom-restart-6fd8ddd6c8-zt2gp",container="hamster",instance="hamster-oom-restart-6fd8ddd6c8-zt2gp",job="e2e-test-oom",namespace="vertical-pod-autoscaling-edge-cases-1333"} 0
+
+  I1005 18:16:39.719173 2097767 pushgateway_utils.go:113] Successfully pushed metric to Pushgateway: 
+  [1mSTEP:[0m Waiting for Prometheus to scrape baseline [38;5;243m@ 10/05/25 18:16:39.719[0m
+  I1005 18:16:59.707128 2097767 autoscaling_utils.go:213] RC hamster-oom-restart: sending request to consume 10 MB
+  I1005 18:16:59.707214 2097767 autoscaling_utils.go:234] RC hamster-oom-restart: sending request to consume 1 of custom metric QPS
+  I1005 18:16:59.707273 2097767 autoscaling_utils.go:310] ConsumeCustomMetric URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1333/services/hamster-oom-restart-ctrl/proxy/BumpMetric  false false delta=1&durationSec=30&metric=QPS&requestSizeMetrics=10  }
+  I1005 18:16:59.707351 2097767 autoscaling_utils.go:283] ConsumeMem URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1333/services/hamster-oom-restart-ctrl/proxy/ConsumeMem  false false durationSec=30&megabytes=10&requestSizeMegabytes=100  }
+  I1005 18:16:59.707154 2097767 autoscaling_utils.go:192] RC hamster-oom-restart: sending request to consume 1 millicores
+  I1005 18:16:59.707421 2097767 autoscaling_utils.go:257] ConsumeCPU URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1333/services/hamster-oom-restart-ctrl/proxy/ConsumeCPU  false false durationSec=30&millicores=1&requestSizeMillicores=20  }
+  I1005 18:17:29.712815 2097767 autoscaling_utils.go:234] RC hamster-oom-restart: sending request to consume 1 of custom metric QPS
+  I1005 18:17:29.712887 2097767 autoscaling_utils.go:213] RC hamster-oom-restart: sending request to consume 10 MB
+  I1005 18:17:29.712940 2097767 autoscaling_utils.go:192] RC hamster-oom-restart: sending request to consume 1 millicores
+  I1005 18:17:29.712961 2097767 autoscaling_utils.go:283] ConsumeMem URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1333/services/hamster-oom-restart-ctrl/proxy/ConsumeMem  false false durationSec=30&megabytes=10&requestSizeMegabytes=100  }
+  I1005 18:17:29.712996 2097767 autoscaling_utils.go:257] ConsumeCPU URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1333/services/hamster-oom-restart-ctrl/proxy/ConsumeCPU  false false durationSec=30&millicores=1&requestSizeMillicores=20  }
+  I1005 18:17:29.712946 2097767 autoscaling_utils.go:310] ConsumeCustomMetric URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1333/services/hamster-oom-restart-ctrl/proxy/BumpMetric  false false delta=1&durationSec=30&metric=QPS&requestSizeMetrics=10  }
+  [1mSTEP:[0m Pushing OOM events for first-gen pods (pod1: 2 OOMs, pod2: 1 OOM) [38;5;243m@ 10/05/25 18:17:44.717[0m
+  I1005 18:17:44.717428 2097767 pushgateway_utils.go:84] Pushing metric to Pushgateway service: pushgateway (path: metrics/job/e2e-test-oom/instance/hamster-oom-restart-6fd8ddd6c8-fwsxv)
+  I1005 18:17:44.717446 2097767 pushgateway_utils.go:85] Metric data:
+  # HELP e2e_test_oom_events_total Fake metric for E2E testing
+  # TYPE e2e_test_oom_events_total counter
+  e2e_test_oom_events_total{instance="hamster-oom-restart-6fd8ddd6c8-fwsxv",job="e2e-test-oom",namespace="vertical-pod-autoscaling-edge-cases-1333",pod="hamster-oom-restart-6fd8ddd6c8-fwsxv",container="hamster"} 2
+
+  I1005 18:17:44.721965 2097767 pushgateway_utils.go:113] Successfully pushed metric to Pushgateway: 
+  I1005 18:17:44.722017 2097767 pushgateway_utils.go:84] Pushing metric to Pushgateway service: pushgateway (path: metrics/job/e2e-test-oom/instance/hamster-oom-restart-6fd8ddd6c8-zt2gp)
+  I1005 18:17:44.722023 2097767 pushgateway_utils.go:85] Metric data:
+  # HELP e2e_test_oom_events_total Fake metric for E2E testing
+  # TYPE e2e_test_oom_events_total counter
+  e2e_test_oom_events_total{job="e2e-test-oom",namespace="vertical-pod-autoscaling-edge-cases-1333",pod="hamster-oom-restart-6fd8ddd6c8-zt2gp",container="hamster",instance="hamster-oom-restart-6fd8ddd6c8-zt2gp"} 1
+
+  I1005 18:17:44.725257 2097767 pushgateway_utils.go:113] Successfully pushed metric to Pushgateway: 
+  [1mSTEP:[0m Waiting for VPA to process first-gen OOMs and increase memory [38;5;243m@ 10/05/25 18:17:44.725[0m
+  I1005 18:17:59.719851 2097767 autoscaling_utils.go:234] RC hamster-oom-restart: sending request to consume 1 of custom metric QPS
+  I1005 18:17:59.719935 2097767 autoscaling_utils.go:213] RC hamster-oom-restart: sending request to consume 10 MB
+  I1005 18:17:59.720010 2097767 autoscaling_utils.go:310] ConsumeCustomMetric URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1333/services/hamster-oom-restart-ctrl/proxy/BumpMetric  false false delta=1&durationSec=30&metric=QPS&requestSizeMetrics=10  }
+  I1005 18:17:59.719877 2097767 autoscaling_utils.go:192] RC hamster-oom-restart: sending request to consume 1 millicores
+  I1005 18:17:59.720074 2097767 autoscaling_utils.go:257] ConsumeCPU URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1333/services/hamster-oom-restart-ctrl/proxy/ConsumeCPU  false false durationSec=30&millicores=1&requestSizeMillicores=20  }
+  I1005 18:17:59.720210 2097767 autoscaling_utils.go:283] ConsumeMem URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1333/services/hamster-oom-restart-ctrl/proxy/ConsumeMem  false false durationSec=30&megabytes=10&requestSizeMegabytes=100  }
+  I1005 18:18:29.725927 2097767 autoscaling_utils.go:213] RC hamster-oom-restart: sending request to consume 10 MB
+  I1005 18:18:29.725990 2097767 autoscaling_utils.go:192] RC hamster-oom-restart: sending request to consume 1 millicores
+  I1005 18:18:29.726091 2097767 autoscaling_utils.go:257] ConsumeCPU URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1333/services/hamster-oom-restart-ctrl/proxy/ConsumeCPU  false false durationSec=30&millicores=1&requestSizeMillicores=20  }
+  I1005 18:18:29.726092 2097767 autoscaling_utils.go:283] ConsumeMem URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1333/services/hamster-oom-restart-ctrl/proxy/ConsumeMem  false false durationSec=30&megabytes=10&requestSizeMegabytes=100  }
+  I1005 18:18:29.726173 2097767 autoscaling_utils.go:234] RC hamster-oom-restart: sending request to consume 1 of custom metric QPS
+  I1005 18:18:29.726271 2097767 autoscaling_utils.go:310] ConsumeCustomMetric URL: {https   127.0.0.1:38073 /api/v1/namespaces/vertical-pod-autoscaling-edge-cases-1333/services/hamster-oom-restart-ctrl/proxy/BumpMetric  false false delta=1&durationSec=30&metric=QPS&requestSizeMetrics=10  }

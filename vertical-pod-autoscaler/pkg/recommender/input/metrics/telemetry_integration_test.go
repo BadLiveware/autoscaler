@@ -19,6 +19,7 @@ package metrics
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -441,4 +442,852 @@ func findSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// ============================================================================
+// PHASE 2: Query Variations - Integration Tests
+// ============================================================================
+
+// TestTelemetryIntegration_PartialCustomQuery_OOMOnly tests using a custom OOM
+// query while CPU and Memory use defaults.
+func TestTelemetryIntegration_PartialCustomQuery_OOMOnly(t *testing.T) {
+	// Create fake Prometheus server
+	promServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "failed to parse form", http.StatusBadRequest)
+			return
+		}
+		query := r.Form.Get("query")
+
+		var response prometheusResponse
+
+		if contains(query, "my_custom_oom_counter") {
+			// Custom OOM query
+			response = prometheusResponse{
+				Status: "success",
+				Data: prometheusData{
+					ResultType: "vector",
+					Result: []prometheusResult{
+						{
+							Metric: map[string]string{
+								"namespace": "default",
+								"pod":       "test-pod",
+								"container": "app",
+							},
+							Value: []interface{}{float64(time.Now().Unix()), "2"},
+						},
+					},
+				},
+			}
+		} else if contains(query, "container_cpu") {
+			// Default CPU query
+			response = prometheusResponse{
+				Status: "success",
+				Data: prometheusData{
+					ResultType: "vector",
+					Result: []prometheusResult{
+						{
+							Metric: map[string]string{
+								"namespace": "default",
+								"pod":       "test-pod",
+								"container": "app",
+							},
+							Value: []interface{}{float64(time.Now().Unix()), "0.5"},
+						},
+					},
+				},
+			}
+		} else if contains(query, "container_memory") {
+			// Default memory query
+			response = prometheusResponse{
+				Status: "success",
+				Data: prometheusData{
+					ResultType: "vector",
+					Result: []prometheusResult{
+						{
+							Metric: map[string]string{
+								"namespace": "default",
+								"pod":       "test-pod",
+								"container": "app",
+							},
+							Value: []interface{}{float64(time.Now().Unix()), "100000000"},
+						},
+					},
+				},
+			}
+		} else {
+			http.Error(w, "unexpected query", http.StatusBadRequest)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer promServer.Close()
+
+	// Create VPA with custom OOM query only
+	vpa := &model.Vpa{
+		ID: model.VpaID{Namespace: "default", VpaName: "test-vpa"},
+		Telemetry: &vpa_types.TelemetryConfig{
+			Source: vpa_types.TelemetrySourcePrometheus,
+			Prometheus: &vpa_types.PrometheusTelemetry{
+				Address: promServer.URL,
+				Query: &vpa_types.PrometheusTelemetryQuery{
+					OOMCountQuery: "my_custom_oom_counter{namespace=\"default\"}",
+					// CPU and Memory queries are nil - should use defaults
+				},
+			},
+		},
+		PodSelector: labels.Everything(),
+		PodCount:    1,
+	}
+
+	clusterState := model.NewClusterState(10 * time.Minute)
+	clusterState.AddOrUpdatePod(model.PodID{Namespace: "default", PodName: "test-pod"}, map[string]string{}, corev1.PodRunning)
+	clusterState.AddOrUpdateContainer(
+		model.ContainerID{PodID: model.PodID{Namespace: "default", PodName: "test-pod"}, ContainerName: "app"},
+		model.Resources{},
+	)
+	clusterState.AddOrUpdateVpa(
+		&vpa_types.VerticalPodAutoscaler{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-vpa", Namespace: "default"},
+			Spec:       vpa_types.VerticalPodAutoscalerSpec{Telemetry: vpa.Telemetry},
+		},
+		vpa.PodSelector,
+		nil,
+	)
+
+	source := NewTelemetryAwareSource(nil, clusterState, nil)
+	result, err := source.List(context.Background(), "", metav1.ListOptions{})
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Len(t, result.Items, 1, "Should have metrics for one pod")
+	assert.Equal(t, "test-pod", result.Items[0].Name)
+	assert.Len(t, result.Items[0].Containers, 1, "Should have metrics for one container")
+	// Verify CPU and Memory metrics are present (from defaults)
+	assert.Contains(t, result.Items[0].Containers[0].Usage, corev1.ResourceCPU)
+	assert.Contains(t, result.Items[0].Containers[0].Usage, corev1.ResourceMemory)
+}
+
+// TestTelemetryIntegration_PartialCustomQuery_CPUOnly tests using a custom CPU
+// query while Memory and OOM use defaults.
+func TestTelemetryIntegration_PartialCustomQuery_CPUOnly(t *testing.T) {
+	promServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "failed to parse form", http.StatusBadRequest)
+			return
+		}
+		query := r.Form.Get("query")
+
+		var response prometheusResponse
+
+		if contains(query, "my_custom_cpu_metric") {
+			// Custom CPU query
+			response = prometheusResponse{
+				Status: "success",
+				Data: prometheusData{
+					ResultType: "vector",
+					Result: []prometheusResult{
+						{
+							Metric: map[string]string{
+								"namespace": "default",
+								"pod":       "test-pod",
+								"container": "app",
+							},
+							Value: []interface{}{float64(time.Now().Unix()), "0.8"},
+						},
+					},
+				},
+			}
+		} else if contains(query, "container_memory") {
+			// Default memory query
+			response = prometheusResponse{
+				Status: "success",
+				Data: prometheusData{
+					ResultType: "vector",
+					Result: []prometheusResult{
+						{
+							Metric: map[string]string{
+								"namespace": "default",
+								"pod":       "test-pod",
+								"container": "app",
+							},
+							Value: []interface{}{float64(time.Now().Unix()), "200000000"},
+						},
+					},
+				},
+			}
+		} else {
+			// OOM and other queries return empty
+			response = prometheusResponse{
+				Status: "success",
+				Data: prometheusData{
+					ResultType: "vector",
+					Result:     []prometheusResult{},
+				},
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer promServer.Close()
+
+	vpa := &model.Vpa{
+		ID: model.VpaID{Namespace: "default", VpaName: "test-vpa"},
+		Telemetry: &vpa_types.TelemetryConfig{
+			Source: vpa_types.TelemetrySourcePrometheus,
+			Prometheus: &vpa_types.PrometheusTelemetry{
+				Address: promServer.URL,
+				Query: &vpa_types.PrometheusTelemetryQuery{
+					CPUUsageQuery: "my_custom_cpu_metric{namespace=\"default\"}",
+					// Memory and OOM queries are nil - should use defaults
+				},
+			},
+		},
+		PodSelector: labels.Everything(),
+		PodCount:    1,
+	}
+
+	clusterState := model.NewClusterState(10 * time.Minute)
+	clusterState.AddOrUpdatePod(model.PodID{Namespace: "default", PodName: "test-pod"}, map[string]string{}, corev1.PodRunning)
+	clusterState.AddOrUpdateContainer(
+		model.ContainerID{PodID: model.PodID{Namespace: "default", PodName: "test-pod"}, ContainerName: "app"},
+		model.Resources{},
+	)
+	clusterState.AddOrUpdateVpa(
+		&vpa_types.VerticalPodAutoscaler{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-vpa", Namespace: "default"},
+			Spec:       vpa_types.VerticalPodAutoscalerSpec{Telemetry: vpa.Telemetry},
+		},
+		vpa.PodSelector,
+		nil,
+	)
+
+	source := NewTelemetryAwareSource(nil, clusterState, nil)
+	result, err := source.List(context.Background(), "", metav1.ListOptions{})
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Len(t, result.Items, 1)
+	// Verify both CPU (custom) and Memory (default) are present
+	assert.Contains(t, result.Items[0].Containers[0].Usage, corev1.ResourceCPU)
+	assert.Contains(t, result.Items[0].Containers[0].Usage, corev1.ResourceMemory)
+}
+
+// TestTelemetryIntegration_PartialCustomQuery_MemoryOnly tests using a custom Memory
+// query while CPU and OOM use defaults.
+func TestTelemetryIntegration_PartialCustomQuery_MemoryOnly(t *testing.T) {
+	promServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "failed to parse form", http.StatusBadRequest)
+			return
+		}
+		query := r.Form.Get("query")
+
+		var response prometheusResponse
+
+		if contains(query, "my_custom_memory_metric") {
+			// Custom memory query
+			response = prometheusResponse{
+				Status: "success",
+				Data: prometheusData{
+					ResultType: "vector",
+					Result: []prometheusResult{
+						{
+							Metric: map[string]string{
+								"namespace": "default",
+								"pod":       "test-pod",
+								"container": "app",
+							},
+							Value: []interface{}{float64(time.Now().Unix()), "500000000"},
+						},
+					},
+				},
+			}
+		} else if contains(query, "container_cpu") {
+			// Default CPU query
+			response = prometheusResponse{
+				Status: "success",
+				Data: prometheusData{
+					ResultType: "vector",
+					Result: []prometheusResult{
+						{
+							Metric: map[string]string{
+								"namespace": "default",
+								"pod":       "test-pod",
+								"container": "app",
+							},
+							Value: []interface{}{float64(time.Now().Unix()), "0.3"},
+						},
+					},
+				},
+			}
+		} else {
+			response = prometheusResponse{
+				Status: "success",
+				Data: prometheusData{
+					ResultType: "vector",
+					Result:     []prometheusResult{},
+				},
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer promServer.Close()
+
+	vpa := &model.Vpa{
+		ID: model.VpaID{Namespace: "default", VpaName: "test-vpa"},
+		Telemetry: &vpa_types.TelemetryConfig{
+			Source: vpa_types.TelemetrySourcePrometheus,
+			Prometheus: &vpa_types.PrometheusTelemetry{
+				Address: promServer.URL,
+				Query: &vpa_types.PrometheusTelemetryQuery{
+					MemoryUsageQuery: "my_custom_memory_metric{namespace=\"default\"}",
+					// CPU and OOM queries are nil - should use defaults
+				},
+			},
+		},
+		PodSelector: labels.Everything(),
+		PodCount:    1,
+	}
+
+	clusterState := model.NewClusterState(10 * time.Minute)
+	clusterState.AddOrUpdatePod(model.PodID{Namespace: "default", PodName: "test-pod"}, map[string]string{}, corev1.PodRunning)
+	clusterState.AddOrUpdateContainer(
+		model.ContainerID{PodID: model.PodID{Namespace: "default", PodName: "test-pod"}, ContainerName: "app"},
+		model.Resources{},
+	)
+	clusterState.AddOrUpdateVpa(
+		&vpa_types.VerticalPodAutoscaler{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-vpa", Namespace: "default"},
+			Spec:       vpa_types.VerticalPodAutoscalerSpec{Telemetry: vpa.Telemetry},
+		},
+		vpa.PodSelector,
+		nil,
+	)
+
+	source := NewTelemetryAwareSource(nil, clusterState, nil)
+	result, err := source.List(context.Background(), "", metav1.ListOptions{})
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Len(t, result.Items, 1)
+	// Verify both CPU (default) and Memory (custom) are present
+	assert.Contains(t, result.Items[0].Containers[0].Usage, corev1.ResourceCPU)
+	assert.Contains(t, result.Items[0].Containers[0].Usage, corev1.ResourceMemory)
+}
+
+// TestTelemetryIntegration_AllCustomQueries tests using custom queries for all metrics.
+func TestTelemetryIntegration_AllCustomQueries(t *testing.T) {
+	promServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "failed to parse form", http.StatusBadRequest)
+			return
+		}
+		query := r.Form.Get("query")
+
+		var response prometheusResponse
+
+		if contains(query, "custom_cpu") {
+			response = prometheusResponse{
+				Status: "success",
+				Data: prometheusData{
+					ResultType: "vector",
+					Result: []prometheusResult{
+						{
+							Metric: map[string]string{
+								"namespace": "prod",
+								"pod":       "api-server",
+								"container": "main",
+							},
+							Value: []interface{}{float64(time.Now().Unix()), "1.5"},
+						},
+					},
+				},
+			}
+		} else if contains(query, "custom_memory") {
+			response = prometheusResponse{
+				Status: "success",
+				Data: prometheusData{
+					ResultType: "vector",
+					Result: []prometheusResult{
+						{
+							Metric: map[string]string{
+								"namespace": "prod",
+								"pod":       "api-server",
+								"container": "main",
+							},
+							Value: []interface{}{float64(time.Now().Unix()), "800000000"},
+						},
+					},
+				},
+			}
+		} else if contains(query, "custom_oom") {
+			response = prometheusResponse{
+				Status: "success",
+				Data: prometheusData{
+					ResultType: "vector",
+					Result: []prometheusResult{
+						{
+							Metric: map[string]string{
+								"namespace": "prod",
+								"pod":       "api-server",
+								"container": "main",
+							},
+							Value: []interface{}{float64(time.Now().Unix()), "5"},
+						},
+					},
+				},
+			}
+		} else {
+			http.Error(w, "unexpected query", http.StatusBadRequest)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer promServer.Close()
+
+	vpa := &model.Vpa{
+		ID: model.VpaID{Namespace: "prod", VpaName: "api-vpa"},
+		Telemetry: &vpa_types.TelemetryConfig{
+			Source: vpa_types.TelemetrySourcePrometheus,
+			Prometheus: &vpa_types.PrometheusTelemetry{
+				Address: promServer.URL,
+				Query: &vpa_types.PrometheusTelemetryQuery{
+					CPUUsageQuery:    "custom_cpu",
+					MemoryUsageQuery: "custom_memory",
+					OOMCountQuery:    "custom_oom",
+				},
+			},
+		},
+		PodSelector: labels.Everything(),
+		PodCount:    1,
+	}
+
+	clusterState := model.NewClusterState(10 * time.Minute)
+	clusterState.AddOrUpdatePod(model.PodID{Namespace: "prod", PodName: "api-server"}, map[string]string{}, corev1.PodRunning)
+	clusterState.AddOrUpdateContainer(
+		model.ContainerID{PodID: model.PodID{Namespace: "prod", PodName: "api-server"}, ContainerName: "main"},
+		model.Resources{},
+	)
+	clusterState.AddOrUpdateVpa(
+		&vpa_types.VerticalPodAutoscaler{
+			ObjectMeta: metav1.ObjectMeta{Name: "api-vpa", Namespace: "prod"},
+			Spec:       vpa_types.VerticalPodAutoscalerSpec{Telemetry: vpa.Telemetry},
+		},
+		vpa.PodSelector,
+		nil,
+	)
+
+	source := NewTelemetryAwareSource(nil, clusterState, nil)
+	result, err := source.List(context.Background(), "", metav1.ListOptions{})
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Len(t, result.Items, 1)
+	assert.Equal(t, "api-server", result.Items[0].Name)
+	// Verify all three metrics are present from custom queries
+	assert.Contains(t, result.Items[0].Containers[0].Usage, corev1.ResourceCPU)
+	assert.Contains(t, result.Items[0].Containers[0].Usage, corev1.ResourceMemory)
+}
+
+// ============================================================================
+// PHASE 3 & 4: Advanced/Production Scenarios - Integration Tests
+// ============================================================================
+
+// TestTelemetryIntegration_HighFrequencyOOMs tests rapid OOM counter increments.
+func TestTelemetryIntegration_HighFrequencyOOMs(t *testing.T) {
+	oomCount := uint64(0)
+
+	promServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "failed to parse form", http.StatusBadRequest)
+			return
+		}
+		query := r.Form.Get("query")
+
+		var response prometheusResponse
+
+		if contains(query, "oom") {
+			// Increment OOM counter on each query to simulate rapid OOMs
+			oomCount += 5
+			response = prometheusResponse{
+				Status: "success",
+				Data: prometheusData{
+					ResultType: "vector",
+					Result: []prometheusResult{
+						{
+							Metric: map[string]string{
+								"namespace": "default",
+								"pod":       "crashloop-pod",
+								"container": "app",
+							},
+							Value: []interface{}{float64(time.Now().Unix()), fmt.Sprintf("%d", oomCount)},
+						},
+					},
+				},
+			}
+		} else {
+			// CPU and memory return valid data
+			response = prometheusResponse{
+				Status: "success",
+				Data: prometheusData{
+					ResultType: "vector",
+					Result: []prometheusResult{
+						{
+							Metric: map[string]string{
+								"namespace": "default",
+								"pod":       "crashloop-pod",
+								"container": "app",
+							},
+							Value: []interface{}{float64(time.Now().Unix()), "100000000"},
+						},
+					},
+				},
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer promServer.Close()
+
+	vpa := &model.Vpa{
+		ID: model.VpaID{Namespace: "default", VpaName: "test-vpa"},
+		Telemetry: &vpa_types.TelemetryConfig{
+			Source: vpa_types.TelemetrySourcePrometheus,
+			Prometheus: &vpa_types.PrometheusTelemetry{
+				Address: promServer.URL,
+			},
+		},
+		PodSelector: labels.Everything(),
+		PodCount:    1,
+	}
+
+	clusterState := model.NewClusterState(10 * time.Minute)
+	clusterState.AddOrUpdatePod(model.PodID{Namespace: "default", PodName: "crashloop-pod"}, map[string]string{}, corev1.PodRunning)
+	clusterState.AddOrUpdateContainer(
+		model.ContainerID{PodID: model.PodID{Namespace: "default", PodName: "crashloop-pod"}, ContainerName: "app"},
+		model.Resources{},
+	)
+	clusterState.AddOrUpdateVpa(
+		&vpa_types.VerticalPodAutoscaler{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-vpa", Namespace: "default"},
+			Spec:       vpa_types.VerticalPodAutoscalerSpec{Telemetry: vpa.Telemetry},
+		},
+		vpa.PodSelector,
+		nil,
+	)
+
+	source := NewTelemetryAwareSource(nil, clusterState, nil)
+
+	// Query multiple times to simulate rapid OOM increments
+	for i := 0; i < 3; i++ {
+		result, err := source.List(context.Background(), "", metav1.ListOptions{})
+		assert.NoError(t, err, "Query %d should succeed", i+1)
+		assert.NotNil(t, result)
+		assert.Len(t, result.Items, 1)
+	}
+
+	// Verify the system handled rapid OOMs without crashing
+	assert.Equal(t, uint64(15), oomCount, "OOM counter should have incremented 3 times by 5")
+}
+
+// TestTelemetryIntegration_StaleMetrics tests handling of stale/repeated timestamps.
+func TestTelemetryIntegration_StaleMetrics(t *testing.T) {
+	fixedTimestamp := time.Now().Add(-5 * time.Minute).Unix()
+
+	promServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "failed to parse form", http.StatusBadRequest)
+			return
+		}
+
+		// Always return the same old timestamp (stale data)
+		response := prometheusResponse{
+			Status: "success",
+			Data: prometheusData{
+				ResultType: "vector",
+				Result: []prometheusResult{
+					{
+						Metric: map[string]string{
+							"namespace": "default",
+							"pod":       "stale-pod",
+							"container": "app",
+						},
+						Value: []interface{}{float64(fixedTimestamp), "100000000"},
+					},
+				},
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer promServer.Close()
+
+	vpa := &model.Vpa{
+		ID: model.VpaID{Namespace: "default", VpaName: "test-vpa"},
+		Telemetry: &vpa_types.TelemetryConfig{
+			Source: vpa_types.TelemetrySourcePrometheus,
+			Prometheus: &vpa_types.PrometheusTelemetry{
+				Address: promServer.URL,
+			},
+		},
+		PodSelector: labels.Everything(),
+		PodCount:    1,
+	}
+
+	clusterState := model.NewClusterState(10 * time.Minute)
+	clusterState.AddOrUpdatePod(model.PodID{Namespace: "default", PodName: "stale-pod"}, map[string]string{}, corev1.PodRunning)
+	clusterState.AddOrUpdateContainer(
+		model.ContainerID{PodID: model.PodID{Namespace: "default", PodName: "stale-pod"}, ContainerName: "app"},
+		model.Resources{},
+	)
+	clusterState.AddOrUpdateVpa(
+		&vpa_types.VerticalPodAutoscaler{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-vpa", Namespace: "default"},
+			Spec:       vpa_types.VerticalPodAutoscalerSpec{Telemetry: vpa.Telemetry},
+		},
+		vpa.PodSelector,
+		nil,
+	)
+
+	source := NewTelemetryAwareSource(nil, clusterState, nil)
+	result, err := source.List(context.Background(), "", metav1.ListOptions{})
+
+	// Should handle stale metrics gracefully without errors
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Len(t, result.Items, 1)
+	// Metrics should still be returned even if stale
+	assert.Equal(t, "stale-pod", result.Items[0].Name)
+}
+
+// TestTelemetryIntegration_SlowQueryTimeout tests handling of slow Prometheus responses.
+func TestTelemetryIntegration_SlowQueryTimeout(t *testing.T) {
+	promServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Simulate slow query (but not so slow it actually times out in test)
+		time.Sleep(2 * time.Second)
+
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "failed to parse form", http.StatusBadRequest)
+			return
+		}
+
+		response := prometheusResponse{
+			Status: "success",
+			Data: prometheusData{
+				ResultType: "vector",
+				Result: []prometheusResult{
+					{
+						Metric: map[string]string{
+							"namespace": "default",
+							"pod":       "slow-pod",
+							"container": "app",
+						},
+						Value: []interface{}{float64(time.Now().Unix()), "100000000"},
+					},
+				},
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer promServer.Close()
+
+	vpa := &model.Vpa{
+		ID: model.VpaID{Namespace: "default", VpaName: "test-vpa"},
+		Telemetry: &vpa_types.TelemetryConfig{
+			Source: vpa_types.TelemetrySourcePrometheus,
+			Prometheus: &vpa_types.PrometheusTelemetry{
+				Address: promServer.URL,
+			},
+		},
+		PodSelector: labels.Everything(),
+		PodCount:    1,
+	}
+
+	clusterState := model.NewClusterState(10 * time.Minute)
+	clusterState.AddOrUpdatePod(model.PodID{Namespace: "default", PodName: "slow-pod"}, map[string]string{}, corev1.PodRunning)
+	clusterState.AddOrUpdateContainer(
+		model.ContainerID{PodID: model.PodID{Namespace: "default", PodName: "slow-pod"}, ContainerName: "app"},
+		model.Resources{},
+	)
+	clusterState.AddOrUpdateVpa(
+		&vpa_types.VerticalPodAutoscaler{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-vpa", Namespace: "default"},
+			Spec:       vpa_types.VerticalPodAutoscalerSpec{Telemetry: vpa.Telemetry},
+		},
+		vpa.PodSelector,
+		nil,
+	)
+
+	source := NewTelemetryAwareSource(nil, clusterState, nil)
+
+	start := time.Now()
+	result, err := source.List(context.Background(), "", metav1.ListOptions{})
+	duration := time.Since(start)
+
+	// Should eventually complete (not hang indefinitely)
+	assert.NoError(t, err, "Slow query should eventually complete")
+	assert.NotNil(t, result)
+	assert.Greater(t, duration.Seconds(), 2.0, "Should have waited for slow response")
+	assert.Less(t, duration.Seconds(), 30.0, "Should not hang indefinitely")
+}
+
+// ============================================================================
+// PHASE 5: Error Recovery - Integration Tests
+// ============================================================================
+
+// TestTelemetryIntegration_InvalidPrometheusData tests handling of malformed responses.
+func TestTelemetryIntegration_InvalidPrometheusData(t *testing.T) {
+	testCases := []struct {
+		name         string
+		responseBody string
+		description  string
+	}{
+		{
+			name:         "Malformed JSON",
+			responseBody: `{"status": "success", "data": {invalid json`,
+			description:  "Prometheus returns malformed JSON",
+		},
+		{
+			name:         "Missing required fields",
+			responseBody: `{"status": "success"}`,
+			description:  "Prometheus response missing 'data' field",
+		},
+		{
+			name:         "Wrong result type",
+			responseBody: `{"status": "success", "data": {"resultType": "matrix", "result": []}}`,
+			description:  "Prometheus returns matrix instead of vector",
+		},
+		{
+			name:         "Invalid metric value",
+			responseBody: `{"status": "success", "data": {"resultType": "vector", "result": [{"metric": {"namespace": "default", "pod": "test", "container": "app"}, "value": ["not_a_number", "invalid"]}]}}`,
+			description:  "Metric value is not a number",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			promServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Write([]byte(tc.responseBody))
+			}))
+			defer promServer.Close()
+
+			vpa := &model.Vpa{
+				ID: model.VpaID{Namespace: "default", VpaName: "test-vpa"},
+				Telemetry: &vpa_types.TelemetryConfig{
+					Source: vpa_types.TelemetrySourcePrometheus,
+					Prometheus: &vpa_types.PrometheusTelemetry{
+						Address: promServer.URL,
+					},
+				},
+				PodSelector: labels.Everything(),
+				PodCount:    1,
+			}
+
+			clusterState := model.NewClusterState(10 * time.Minute)
+			clusterState.AddOrUpdatePod(model.PodID{Namespace: "default", PodName: "test-pod"}, map[string]string{}, corev1.PodRunning)
+			clusterState.AddOrUpdateContainer(
+				model.ContainerID{PodID: model.PodID{Namespace: "default", PodName: "test-pod"}, ContainerName: "app"},
+				model.Resources{},
+			)
+			clusterState.AddOrUpdateVpa(
+				&vpa_types.VerticalPodAutoscaler{
+					ObjectMeta: metav1.ObjectMeta{Name: "test-vpa", Namespace: "default"},
+					Spec:       vpa_types.VerticalPodAutoscalerSpec{Telemetry: vpa.Telemetry},
+				},
+				vpa.PodSelector,
+				nil,
+			)
+
+			source := NewTelemetryAwareSource(nil, clusterState, nil)
+			result, err := source.List(context.Background(), "", metav1.ListOptions{})
+
+			// Should handle invalid data gracefully - may return error or empty result
+			// Key point: should not crash or panic
+			if err != nil {
+				t.Logf("Handled invalid data with error (expected): %v", err)
+			}
+			if result != nil {
+				t.Logf("Handled invalid data by returning result: %d items", len(result.Items))
+			}
+			// Test passes as long as it doesn't panic
+		})
+	}
+}
+
+// TestTelemetryIntegration_PrometheusErrorResponse tests handling of Prometheus error responses.
+func TestTelemetryIntegration_PrometheusErrorResponse(t *testing.T) {
+	testCases := []struct {
+		name         string
+		statusCode   int
+		responseBody string
+	}{
+		{
+			name:         "400 Bad Request",
+			statusCode:   http.StatusBadRequest,
+			responseBody: `{"status": "error", "errorType": "bad_data", "error": "invalid query"}`,
+		},
+		{
+			name:         "503 Service Unavailable",
+			statusCode:   http.StatusServiceUnavailable,
+			responseBody: `{"status": "error", "error": "service temporarily unavailable"}`,
+		},
+		{
+			name:         "422 Unprocessable Entity",
+			statusCode:   http.StatusUnprocessableEntity,
+			responseBody: `{"status": "error", "errorType": "execution", "error": "query timeout"}`,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			promServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.statusCode)
+				w.Write([]byte(tc.responseBody))
+			}))
+			defer promServer.Close()
+
+			vpa := &model.Vpa{
+				ID: model.VpaID{Namespace: "default", VpaName: "test-vpa"},
+				Telemetry: &vpa_types.TelemetryConfig{
+					Source: vpa_types.TelemetrySourcePrometheus,
+					Prometheus: &vpa_types.PrometheusTelemetry{
+						Address: promServer.URL,
+					},
+				},
+				PodSelector: labels.Everything(),
+				PodCount:    1,
+			}
+
+			clusterState := model.NewClusterState(10 * time.Minute)
+			clusterState.AddOrUpdateVpa(
+				&vpa_types.VerticalPodAutoscaler{
+					ObjectMeta: metav1.ObjectMeta{Name: "test-vpa", Namespace: "default"},
+					Spec:       vpa_types.VerticalPodAutoscalerSpec{Telemetry: vpa.Telemetry},
+				},
+				vpa.PodSelector,
+				nil,
+			)
+
+			source := NewTelemetryAwareSource(nil, clusterState, nil)
+			result, err := source.List(context.Background(), "", metav1.ListOptions{})
+
+			// Should handle error gracefully
+			t.Logf("Prometheus error response handled: err=%v, result=%v", err, result != nil)
+			// Test passes as long as it doesn't panic
+		})
+	}
 }

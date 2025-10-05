@@ -81,19 +81,28 @@ func (r *recommender) GetClusterStateFeeder() input.ClusterStateFeeder {
 }
 
 func processVPAUpdate(r *recommender, vpa *model.Vpa, observedVpa *v1.VerticalPodAutoscaler) {
-	resources := r.podResourceRecommender.GetRecommendedPodResources(GetContainerNameToAggregateStateMap(vpa))
-	had := vpa.HasRecommendation()
+	// If telemetry failed and fallback is disabled (fail-closed), skip recommendation generation
+	if !vpa.TelemetryFailed {
+		// Generate recommendations normally
+		had := vpa.HasRecommendation()
 
-	listOfResourceRecommendation := logic.MapToListOfRecommendedContainerResources(resources)
+		resources := r.podResourceRecommender.GetRecommendedPodResources(GetContainerNameToAggregateStateMap(vpa))
+		listOfResourceRecommendation := logic.MapToListOfRecommendedContainerResources(resources)
 
-	for _, postProcessor := range r.recommendationPostProcessor {
-		listOfResourceRecommendation = postProcessor.Process(observedVpa, listOfResourceRecommendation)
+		for _, postProcessor := range r.recommendationPostProcessor {
+			listOfResourceRecommendation = postProcessor.Process(observedVpa, listOfResourceRecommendation)
+		}
+
+		vpa.UpdateRecommendation(listOfResourceRecommendation)
+
+		if vpa.HasRecommendation() && !had {
+			metrics_recommender.ObserveRecommendationLatency(vpa.Created)
+		}
+	} else {
+		klog.V(3).InfoS("Skipping recommendation generation for VPA with failed telemetry (fail-closed)",
+			"vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName))
 	}
 
-	vpa.UpdateRecommendation(listOfResourceRecommendation)
-	if vpa.HasRecommendation() && !had {
-		metrics_recommender.ObserveRecommendationLatency(vpa.Created)
-	}
 	hasMatchingPods := vpa.PodCount > 0
 	vpa.UpdateConditions(hasMatchingPods)
 	if err := r.clusterState.RecordRecommendation(vpa, time.Now()); err != nil {
