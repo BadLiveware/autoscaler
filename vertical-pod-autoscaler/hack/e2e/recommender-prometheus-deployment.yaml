@@ -27,7 +27,9 @@ spec:
           - --use-prometheus-source=true
           - --prometheus-source-address=http://prometheus.monitoring.svc:9090
           - --use-external-oom-observer=true
-          - --prometheus-oom-query=e2e_test_oom_events_total{namespace=~"%s", pod=~"%s"}
+          - --prometheus-cpu-query=rate(container_cpu_usage_seconds_total{namespace=~"{{namespace}}", pod=~"{{pod}}", container!="", container!="POD", image!=""}[5m])
+          - --prometheus-memory-query=container_memory_working_set_bytes{namespace=~"{{namespace}}", pod=~"{{pod}}", container!="", container!="POD", image!=""}
+          - --prometheus-oom-query=e2e_test_oom_events_total{namespace=~"{{namespace}}", pod=~"{{pod}}"}
           - --oom-polling-interval=10s
           - --recommender-interval=10s
           - --pod-recommendation-min-memory-mb=10

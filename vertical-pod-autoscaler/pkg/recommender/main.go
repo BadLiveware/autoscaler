@@ -111,9 +111,9 @@ var (
 	prometheusSourceBearerToken = flag.String("prometheus-source-bearer-token", "", "Bearer token for Prometheus metrics source authentication.")
 	prometheusSourceUsername    = flag.String("prometheus-source-username", "", "Username for Prometheus metrics source basic auth.")
 	prometheusSourcePassword    = flag.String("prometheus-source-password", "", "Password for Prometheus metrics source basic auth.")
-	prometheusCPUQuery          = flag.String("prometheus-cpu-query", "", "Custom PromQL query for CPU usage. Use %s placeholders for namespace and pod regex.")
-	prometheusMemoryQuery       = flag.String("prometheus-memory-query", "", "Custom PromQL query for memory usage. Use %s placeholders for namespace and pod regex.")
-	prometheusOOMQuery          = flag.String("prometheus-oom-query", "", "Custom PromQL query for OOM counter. Use %s placeholders for namespace and pod regex. Enables managed language OOM support.")
+	prometheusCPUQuery          = flag.String("prometheus-cpu-query", "", "Custom PromQL query for CPU usage. Use {{namespace}} and {{pod}} placeholders.")
+	prometheusMemoryQuery       = flag.String("prometheus-memory-query", "", "Custom PromQL query for memory usage. Use {{namespace}} and {{pod}} placeholders.")
+	prometheusOOMQuery          = flag.String("prometheus-oom-query", "", "Custom PromQL query for OOM counter. Use {{namespace}} and {{pod}} placeholders. Enables managed language OOM support.")
 )
 
 // External OOM observer flags

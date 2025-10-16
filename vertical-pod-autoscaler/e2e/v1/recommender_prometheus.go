@@ -74,28 +74,38 @@ var _ = utils.RecommenderPrometheusE2eDescribe("Prometheus Integration", func() 
 		}
 	})
 
-	ginkgo.It("generates recommendations from Prometheus metrics", func() {
-		ginkgo.By("Setting up a hamster deployment")
-		d := utils.NewNHamstersDeployment(f, 1)
-		d.Spec.Template.Spec.Containers[0].Resources.Requests = apiv1.ResourceList{
-			apiv1.ResourceCPU:    ParseQuantityOrDie("100m"),
-			apiv1.ResourceMemory: ParseQuantityOrDie("100Mi"),
-		}
-		podList := utils.StartDeploymentPods(f, d)
-		gomega.Expect(podList.Items).NotTo(gomega.BeEmpty())
+	ginkgo.It("generates recommendations from Prometheus CPU and memory metrics", func() {
+		ginkgo.By("Setting up a resource consumer with known CPU and memory consumption")
+		resourceConsumer = NewDynamicResourceConsumer(
+			"test-metrics-consumer",
+			f.Namespace.Name,
+			KindDeployment,
+			1,   // replicas
+			100, // initCPUTotal (millicores) - consume 100m CPU
+			150, // initMemoryTotal (megabytes) - consume 150MB
+			0,   // initCustomMetric
+			500, // cpuLimit (millicores)
+			512, // memLimit (megabytes)
+			f.ClientSet,
+			f.ScalesGetter,
+		)
 
 		ginkgo.By("Setting up VPA with Prometheus source")
-		containerName := utils.GetHamsterContainerNameByIndex(0)
+		containerName := "test-metrics-consumer"
 		vpaCRD := test.VerticalPodAutoscaler().
-			WithName("hamster-vpa").
+			WithName("test-metrics-vpa").
 			WithNamespace(f.Namespace.Name).
-			WithTargetRef(utils.HamsterTargetRef).
+			WithTargetRef(&autoscalingv1.CrossVersionObjectReference{
+				APIVersion: "apps/v1",
+				Kind:       "Deployment",
+				Name:       "test-metrics-consumer",
+			}).
 			WithContainer(containerName).
 			Get()
 
 		utils.InstallVPA(f, vpaCRD)
 
-		ginkgo.By("Waiting for recommendation to be generated from Prometheus")
+		ginkgo.By("Waiting for recommendation to be generated from Prometheus metrics")
 		vpa, err := utils.WaitForRecommendationPresent(vpaClientSet, vpaCRD)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		gomega.Expect(vpa.Status.Recommendation).NotTo(gomega.BeNil())
@@ -104,7 +114,7 @@ var _ = utils.RecommenderPrometheusE2eDescribe("Prometheus Integration", func() 
 		recommendation := vpa.Status.Recommendation.ContainerRecommendations[0]
 		gomega.Expect(recommendation.ContainerName).To(gomega.Equal(containerName))
 
-		// Verify recommendations are within reasonable bounds
+		// Verify recommendations reflect actual consumption from Prometheus
 		cpuTarget := recommendation.Target[apiv1.ResourceCPU]
 		memoryTarget := recommendation.Target[apiv1.ResourceMemory]
 		gomega.Expect(cpuTarget.IsZero()).To(gomega.BeFalse(), "CPU target should be set")
@@ -112,6 +122,96 @@ var _ = utils.RecommenderPrometheusE2eDescribe("Prometheus Integration", func() 
 
 		framework.Logf("Prometheus-based recommendation: CPU=%s, Memory=%s",
 			cpuTarget.String(), memoryTarget.String())
+
+		// Verify CPU recommendation is reasonable for 100m consumption
+		// Should be >= 100m but not excessively high
+		cpuMillis := cpuTarget.MilliValue()
+		gomega.Expect(cpuMillis).To(gomega.BeNumerically(">=", 25), "CPU recommendation should be at least 25m")
+		gomega.Expect(cpuMillis).To(gomega.BeNumerically("<=", 1000), "CPU recommendation should be reasonable")
+
+		// Verify memory recommendation reflects 150MB consumption
+		// With --pod-recommendation-min-memory-mb=10 for testing, baseline is 10MB
+		memoryBytes := memoryTarget.Value()
+		gomega.Expect(memoryBytes).To(gomega.BeNumerically(">=", 10*1024*1024), "Memory recommendation should be at least 10MB (test minimum)")
+		gomega.Expect(memoryBytes).To(gomega.BeNumerically("<=", 512*1024*1024), "Memory recommendation should be reasonable")
+	})
+
+	ginkgo.It("updates recommendations when resource consumption changes", func() {
+		ginkgo.By("Setting up a resource consumer with initial low consumption")
+		resourceConsumer = NewDynamicResourceConsumer(
+			"test-dynamic-consumer",
+			f.Namespace.Name,
+			KindDeployment,
+			1,    // replicas
+			50,   // initCPUTotal (millicores) - start with low CPU
+			100,  // initMemoryTotal (megabytes) - start with low memory
+			0,    // initCustomMetric
+			1000, // cpuLimit (millicores)
+			1024, // memLimit (megabytes)
+			f.ClientSet,
+			f.ScalesGetter,
+		)
+
+		ginkgo.By("Setting up VPA")
+		containerName := "resource-consumer"
+		vpaCRD := test.VerticalPodAutoscaler().
+			WithName("test-dynamic-vpa").
+			WithNamespace(f.Namespace.Name).
+			WithTargetRef(&autoscalingv1.CrossVersionObjectReference{
+				APIVersion: "apps/v1",
+				Kind:       "Deployment",
+				Name:       "test-dynamic-consumer",
+			}).
+			WithContainer(containerName).
+			Get()
+
+		utils.InstallVPA(f, vpaCRD)
+
+		ginkgo.By("Waiting for initial recommendation")
+		vpa, err := utils.WaitForRecommendationPresent(vpaClientSet, vpaCRD)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
+		initialCPU := vpa.Status.Recommendation.ContainerRecommendations[0].Target[apiv1.ResourceCPU]
+		initialMemory := vpa.Status.Recommendation.ContainerRecommendations[0].Target[apiv1.ResourceMemory]
+		framework.Logf("Initial recommendation: CPU=%s, Memory=%s", initialCPU.String(), initialMemory.String())
+
+		ginkgo.By("Increasing CPU consumption significantly")
+		resourceConsumer.ConsumeCPU(300) // Increase to 300m
+
+		ginkgo.By("Increasing memory consumption significantly")
+		resourceConsumer.ConsumeMem(300) // Increase to 300MB
+
+		ginkgo.By("Waiting for Prometheus to scrape new metrics")
+		time.Sleep(30 * time.Second) // Prometheus scrapes every 5s, recommender runs every 10s
+
+		ginkgo.By("Verifying recommendation increases based on Prometheus metrics")
+		gomega.Eventually(func() bool {
+			currentVPA, err := vpaClientSet.AutoscalingV1().VerticalPodAutoscalers(f.Namespace.Name).Get(
+				context.TODO(), vpaCRD.Name, metav1.GetOptions{})
+			if err != nil {
+				framework.Logf("Error getting VPA: %v", err)
+				return false
+			}
+
+			if currentVPA.Status.Recommendation == nil || len(currentVPA.Status.Recommendation.ContainerRecommendations) == 0 {
+				return false
+			}
+
+			newCPU := currentVPA.Status.Recommendation.ContainerRecommendations[0].Target[apiv1.ResourceCPU]
+			newMemory := currentVPA.Status.Recommendation.ContainerRecommendations[0].Target[apiv1.ResourceMemory]
+
+			framework.Logf("Updated recommendation: CPU=%s, Memory=%s (initial CPU=%s, Memory=%s)",
+				newCPU.String(), newMemory.String(), initialCPU.String(), initialMemory.String())
+
+			// CPU should increase (300m consumption should lead to higher recommendation)
+			cpuIncreased := newCPU.MilliValue() > initialCPU.MilliValue()
+
+			// Memory should increase (300MB consumption should lead to higher recommendation)
+			memoryIncreased := newMemory.Value() > initialMemory.Value()
+
+			return cpuIncreased && memoryIncreased
+		}, 2*time.Minute, 10*time.Second).Should(gomega.BeTrue(),
+			"Recommendations should increase based on Prometheus metrics after consumption increases")
 	})
 
 	ginkgo.It("detects OOM events from Prometheus counters", func() {

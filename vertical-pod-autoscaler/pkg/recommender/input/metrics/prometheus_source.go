@@ -21,6 +21,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,10 +38,10 @@ import (
 )
 
 const (
-	// Default Prometheus queries using cAdvisor metrics
-	defaultPromCPUQuery    = `rate(container_cpu_usage_seconds_total{namespace="%s",pod=~"%s",container!="",container!="POD",image!=""}[5m])`
-	defaultPromMemoryQuery = `container_memory_working_set_bytes{namespace="%s",pod=~"%s",container!="",container!="POD",image!=""}`
-	defaultPromOOMQuery    = `container_oom_events_total{namespace="%s",pod=~"%s",container!="",container!="POD"}`
+	// Default Prometheus queries using cAdvisor metrics with named template placeholders
+	defaultPromCPUQuery    = `rate(container_cpu_usage_seconds_total{namespace=~"{{namespace}}",pod=~"{{pod}}",container!="",container!="POD",image!=""}[5m])`
+	defaultPromMemoryQuery = `container_memory_working_set_bytes{namespace=~"{{namespace}}",pod=~"{{pod}}",container!="",container!="POD",image!=""}`
+	defaultPromOOMQuery    = `container_oom_events_total{namespace=~"{{namespace}}",pod=~"{{pod}}",container!="",container!="POD"}`
 )
 
 // PrometheusSourceConfig configures the Prometheus metrics source.
@@ -208,7 +209,7 @@ func (p *prometheusMetricsSource) GetOOMCounters() map[model.ContainerID]uint64 
 		}
 
 		podRegex := buildPodRegex(matchingPods)
-		oomQuery := fmt.Sprintf(p.config.OOMQuery, vpa.ID.Namespace, podRegex)
+		oomQuery := substituteQueryTemplate(p.config.OOMQuery, vpa.ID.Namespace, podRegex)
 
 		// Query OOM counters
 		oomMetrics, err := p.queryPrometheus(ctx, oomQuery, time.Now())
@@ -258,10 +259,10 @@ func (p *prometheusMetricsSource) queryVPAMetrics(ctx context.Context, vpa *mode
 	podRegex := buildPodRegex(matchingPods)
 	namespace := vpa.ID.Namespace
 
-	// Build queries
-	cpuQuery := fmt.Sprintf(p.config.CPUQuery, namespace, podRegex)
-	memoryQuery := fmt.Sprintf(p.config.MemoryQuery, namespace, podRegex)
-	oomQuery := fmt.Sprintf(p.config.OOMQuery, namespace, podRegex)
+	// Build queries using named template substitution
+	cpuQuery := substituteQueryTemplate(p.config.CPUQuery, namespace, podRegex)
+	memoryQuery := substituteQueryTemplate(p.config.MemoryQuery, namespace, podRegex)
+	oomQuery := substituteQueryTemplate(p.config.OOMQuery, namespace, podRegex)
 
 	// Query CPU metrics
 	cpuMetrics, err := p.queryPrometheus(ctx, cpuQuery, timestamp)
@@ -444,6 +445,14 @@ func buildPodRegex(pods []model.PodID) string {
 		regex += pod.PodName
 	}
 	return regex
+}
+
+// substituteQueryTemplate replaces named placeholders in Prometheus query templates.
+// Uses {{namespace}} and {{pod}} placeholders for safe, order-independent template substitution.
+func substituteQueryTemplate(query, namespace, podRegex string) string {
+	result := strings.ReplaceAll(query, "{{namespace}}", namespace)
+	result = strings.ReplaceAll(result, "{{pod}}", podRegex)
+	return result
 }
 
 // extractContainerIDFromLabels extracts namespace, pod, and container from Prometheus labels.

@@ -13,10 +13,11 @@ This document describes how to configure VPA to query Prometheus directly for co
 ## E2E Testing
 
 The Prometheus integration includes comprehensive e2e tests that verify:
-- Recommendations are generated from Prometheus metrics
-- OOM events from Prometheus counters are detected
-- Multiple OOM events are handled correctly
-- Custom Prometheus queries work
+- **CPU and memory recommendations** are generated from Prometheus metrics (not metrics-server)
+- **Dynamic recommendation updates** when resource consumption changes
+- **OOM event detection** from Prometheus counters
+- **Multiple OOM events** are handled correctly
+- **Custom Prometheus queries** work as expected
 
 ### Running E2E Tests
 
@@ -30,12 +31,58 @@ cd vertical-pod-autoscaler
 This will:
 1. Create a local KIND cluster
 2. Deploy Prometheus and Pushgateway
-3. Deploy VPA recommender with Prometheus source enabled
+3. Deploy VPA recommender with Prometheus source enabled (bypassing metrics-server)
 4. Run the test suite
 
-### Test Structure
+### Test Cases
 
-The tests use Prometheus Pushgateway to simulate OOM events:
+#### 1. CPU and Memory Metrics from Prometheus
+
+Tests that VPA generates recommendations based on actual CPU/memory consumption scraped by Prometheus:
+
+```go
+// Create resource consumer with known consumption
+resourceConsumer = NewDynamicResourceConsumer(
+    "test-metrics-consumer",
+    namespace,
+    KindDeployment,
+    1,   // replicas
+    100, // 100m CPU consumption
+    150, // 150MB memory consumption
+    ...
+)
+
+// Verify recommendations reflect Prometheus data
+// CPU should be >= 25m (based on 100m consumption)
+// Memory should be >= 250MB (VPA minimum)
+```
+
+This validates that the direct Prometheus integration works as a complete replacement for metrics-server.
+
+#### 2. Dynamic Recommendation Updates
+
+Tests that recommendations update when consumption patterns change:
+
+```go
+// Start with low consumption
+resourceConsumer.ConsumeCPU(50)   // 50m
+resourceConsumer.ConsumeMem(100)  // 100MB
+
+// Wait for initial recommendation
+vpa := WaitForRecommendationPresent()
+
+// Increase consumption significantly
+resourceConsumer.ConsumeCPU(300)  // 300m
+resourceConsumer.ConsumeMem(300)  // 300MB
+
+// Verify recommendations increase accordingly
+```
+
+This ensures Prometheus metrics are continuously processed and recommendations stay current with actual usage.
+
+#### 3. OOM Event Detection
+
+Tests that external OOM observer detects counter increases from Prometheus:
 
 ```go
 // Push an OOM counter to Prometheus via Pushgateway
@@ -43,11 +90,49 @@ err := pushgatewayClient.PushOOMCounter(
     pod.Namespace,
     pod.Name,
     containerName,
-    2.0, // OOM count
+    2.0, // OOM count increased from 1 to 2
 )
+
+// External OOM observer polls Prometheus (every 10s in tests)
+// Detects counter increase and generates OomInfo event
+// Memory recommendation should increase by at least 10%
 ```
 
-The external OOM observer polls Prometheus (every 10s in tests) and detects counter increases, triggering memory recommendation updates.
+This validates managed language OOM support (.NET, Java, Go) where OOMs don't result in `OOMKilled` pod status.
+
+#### 4. Multiple OOM Events
+
+Tests that multiple OOM events compound properly:
+
+```go
+// Push 3 OOM events sequentially
+for i := 1; i <= 3; i++ {
+    pushgatewayClient.PushOOMCounter(..., float64(i))
+    time.Sleep(15 * time.Second) // Wait for Prometheus scrape
+}
+
+// Memory recommendation should increase by at least 20%
+```
+
+### Test Environment
+
+- **Prometheus**: Scrapes metrics every 5 seconds
+- **Pushgateway**: Accepts OOM counter pushes for testing
+- **VPA Recommender**: 
+  - Runs with `--recommender-interval=10s` for faster updates
+  - Polls OOM counters every 10 seconds
+  - Configured with `--use-prometheus-source=true`
+  - Uses custom OOM query: `e2e_test_oom_events_total{namespace=~"%s", pod=~"%s"}`
+
+### Resource Consumer
+
+Tests use the Kubernetes `resource-consumer` utility which:
+- Actively consumes specified CPU/memory via HTTP API
+- Generates real metrics that Prometheus scrapes (not synthetic)
+- Supports dynamic consumption changes via `ConsumeCPU()` and `ConsumeMem()` methods
+- Properly cleans up after tests
+
+This ensures test scenarios closely match real-world production workloads.
 
 ## Architecture
 
@@ -96,17 +181,19 @@ The VPA recommender supports the following command-line flags for Prometheus int
 - `--prometheus-source-password`: Basic auth password
   
 - `--prometheus-cpu-query`: Custom PromQL query for CPU usage
-  - Use `%s` placeholders for namespace and pod regex
+  - Use `{{namespace}}` and `{{pod}}` placeholders
   - If not specified, uses default cAdvisor metrics
-  
+  - Example: `rate(my_cpu_metric{namespace=~"{{namespace}}", pod=~"{{pod}}"}[5m])`
+
 - `--prometheus-memory-query`: Custom PromQL query for memory usage
-  - Use `%s` placeholders for namespace and pod regex
+  - Use `{{namespace}}` and `{{pod}}` placeholders
   - If not specified, uses default cAdvisor metrics
-  
+  - Example: `my_memory_metric{namespace=~"{{namespace}}", pod=~"{{pod}}"}`
+
 - `--prometheus-oom-query`: Custom PromQL query for OOM counter
-  - Use `%s` placeholders for namespace and pod regex
+  - Use `{{namespace}}` and `{{pod}}` placeholders
   - Required for managed language OOM support
-  - Example: `dotnet_gc_oom_count{namespace=~"%s", pod=~"%s"}`
+  - Example: `dotnet_gc_oom_count{namespace=~"{{namespace}}", pod=~"{{pod}}"}`
 
 #### External OOM Observer Flags
 
@@ -203,11 +290,11 @@ prometheusSource, err := metrics.NewPrometheusMetricsSource(metrics.PrometheusSo
     Address:      "http://prometheus:9090",
     ClusterState: clusterState,
     // Custom CPU query (default uses rate(container_cpu_usage_seconds_total[5m]))
-    CPUQuery: `rate(custom_cpu_metric{namespace="%s",pod=~"%s"}[5m])`,
+    CPUQuery: `rate(custom_cpu_metric{namespace=~"{{namespace}}",pod=~"{{pod}}"}[5m])`,
     // Custom memory query (default uses container_memory_working_set_bytes)
-    MemoryQuery: `custom_memory_metric{namespace="%s",pod=~"%s"}`,
+    MemoryQuery: `custom_memory_metric{namespace=~"{{namespace}}",pod=~"{{pod}}"}`,
     // Custom OOM counter query for managed languages
-    OOMQuery: `dotnet_runtime_exceptions_total{type="OutOfMemoryException",namespace="%s",pod=~"%s"}`,
+    OOMQuery: `dotnet_runtime_exceptions_total{type="OutOfMemoryException",namespace=~"{{namespace}}",pod=~"{{pod}}"}`,
 })
 ```
 
@@ -218,8 +305,8 @@ The source uses these default queries (querying cAdvisor metrics):
 ### CPU Usage
 ```promql
 rate(container_cpu_usage_seconds_total{
-    namespace="<namespace>",
-    pod=~"<pod-regex>",
+    namespace=~"{{namespace}}",
+    pod=~"{{pod}}",
     container!="",
     container!="POD",
     image!=""
@@ -229,8 +316,8 @@ rate(container_cpu_usage_seconds_total{
 ### Memory Usage
 ```promql
 container_memory_working_set_bytes{
-    namespace="<namespace>",
-    pod=~"<pod-regex>",
+    namespace=~"{{namespace}}",
+    pod=~"{{pod}}",
     container!="",
     container!="POD",
     image!=""
@@ -240,12 +327,14 @@ container_memory_working_set_bytes{
 ### OOM Events
 ```promql
 container_oom_events_total{
-    namespace="<namespace>",
-    pod=~"<pod-regex>",
+    namespace=~"{{namespace}}",
+    pod=~"{{pod}}",
     container!="",
     container!="POD"
 }
 ```
+
+**Note**: Templates use `{{namespace}}` and `{{pod}}` placeholders for safe, order-independent substitution.
 
 ## Managed Language OOM Support
 
