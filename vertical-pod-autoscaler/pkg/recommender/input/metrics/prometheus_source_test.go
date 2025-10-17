@@ -28,10 +28,13 @@ import (
 
 func TestExtractContainerIDFromLabels(t *testing.T) {
 	tests := []struct {
-		name        string
-		labels      prommodel.Metric
-		expected    model.ContainerID
-		expectError bool
+		name           string
+		labels         prommodel.Metric
+		expected       model.ContainerID
+		expectError    bool
+		namespaceLabel string
+		podLabel       string
+		containerLabel string
 	}{
 		{
 			name: "valid labels",
@@ -47,7 +50,10 @@ func TestExtractContainerIDFromLabels(t *testing.T) {
 				},
 				ContainerName: "app",
 			},
-			expectError: false,
+			expectError:    false,
+			namespaceLabel: defaultNamespaceLabel,
+			podLabel:       defaultPodLabel,
+			containerLabel: defaultContainerLabel,
 		},
 		{
 			name: "missing namespace",
@@ -55,7 +61,10 @@ func TestExtractContainerIDFromLabels(t *testing.T) {
 				"pod":       "my-pod",
 				"container": "app",
 			},
-			expectError: true,
+			expectError:    true,
+			namespaceLabel: defaultNamespaceLabel,
+			podLabel:       defaultPodLabel,
+			containerLabel: defaultContainerLabel,
 		},
 		{
 			name: "missing pod",
@@ -63,7 +72,10 @@ func TestExtractContainerIDFromLabels(t *testing.T) {
 				"namespace": "default",
 				"container": "app",
 			},
-			expectError: true,
+			expectError:    true,
+			namespaceLabel: defaultNamespaceLabel,
+			podLabel:       defaultPodLabel,
+			containerLabel: defaultContainerLabel,
 		},
 		{
 			name: "missing container",
@@ -71,13 +83,48 @@ func TestExtractContainerIDFromLabels(t *testing.T) {
 				"namespace": "default",
 				"pod":       "my-pod",
 			},
-			expectError: true,
+			expectError:    true,
+			namespaceLabel: defaultNamespaceLabel,
+			podLabel:       defaultPodLabel,
+			containerLabel: defaultContainerLabel,
+		},
+		{
+			name: "custom labels",
+			labels: prommodel.Metric{
+				"ns":    "custom",
+				"pod_n": "pod-1",
+				"cont":  "main",
+			},
+			expected: model.ContainerID{
+				PodID: model.PodID{
+					Namespace: "custom",
+					PodName:   "pod-1",
+				},
+				ContainerName: "main",
+			},
+			expectError:    false,
+			namespaceLabel: "ns",
+			podLabel:       "pod_n",
+			containerLabel: "cont",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := extractContainerIDFromLabels(tt.labels)
+			namespaceLabel := tt.namespaceLabel
+			if namespaceLabel == "" {
+				namespaceLabel = defaultNamespaceLabel
+			}
+			podLabel := tt.podLabel
+			if podLabel == "" {
+				podLabel = defaultPodLabel
+			}
+			containerLabel := tt.containerLabel
+			if containerLabel == "" {
+				containerLabel = defaultContainerLabel
+			}
+
+			result, err := extractContainerIDFromLabels(tt.labels, namespaceLabel, podLabel, containerLabel)
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -239,6 +286,72 @@ func TestPrometheusSourceConfig_Validation(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 			}
+		})
+	}
+}
+
+func TestNewPrometheusMetricsSource_LabelConfiguration(t *testing.T) {
+	clusterState := model.NewClusterState(time.Hour)
+
+	tests := []struct {
+		name   string
+		config PrometheusSourceConfig
+		expect struct {
+			namespace string
+			pod       string
+			container string
+		}
+	}{
+		{
+			name: "defaults applied",
+			config: PrometheusSourceConfig{
+				Address:      "http://prometheus:9090",
+				ClusterState: clusterState,
+			},
+			expect: struct {
+				namespace string
+				pod       string
+				container string
+			}{
+				namespace: defaultNamespaceLabel,
+				pod:       defaultPodLabel,
+				container: defaultContainerLabel,
+			},
+		},
+		{
+			name: "custom labels respected",
+			config: PrometheusSourceConfig{
+				Address:        "http://prometheus:9090",
+				ClusterState:   clusterState,
+				NamespaceLabel: "ns",
+				PodLabel:       "pod_name",
+				ContainerLabel: "ctr",
+			},
+			expect: struct {
+				namespace string
+				pod       string
+				container string
+			}{
+				namespace: "ns",
+				pod:       "pod_name",
+				container: "ctr",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source, err := NewPrometheusMetricsSource(tt.config)
+			assert.NoError(t, err)
+
+			promSource, ok := source.(*prometheusMetricsSource)
+			if !ok {
+				t.Fatalf("expected *prometheusMetricsSource, got %T", source)
+			}
+
+			assert.Equal(t, tt.expect.namespace, promSource.config.NamespaceLabel)
+			assert.Equal(t, tt.expect.pod, promSource.config.PodLabel)
+			assert.Equal(t, tt.expect.container, promSource.config.ContainerLabel)
 		})
 	}
 }

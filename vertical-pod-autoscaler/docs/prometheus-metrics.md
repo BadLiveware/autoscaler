@@ -295,6 +295,10 @@ prometheusSource, err := metrics.NewPrometheusMetricsSource(metrics.PrometheusSo
     MemoryQuery: `custom_memory_metric{namespace=~"{{namespace}}",pod=~"{{pod}}"}`,
     // Custom OOM counter query for managed languages
     OOMQuery: `dotnet_runtime_exceptions_total{type="OutOfMemoryException",namespace=~"{{namespace}}",pod=~"{{pod}}"}`,
+    // Custom label names for metrics that do not use the default schema
+    NamespaceLabel: "ns",
+    PodLabel:       "pod_name",
+    ContainerLabel: "container_name",
 })
 ```
 

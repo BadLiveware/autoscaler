@@ -104,16 +104,19 @@ var (
 
 // Prometheus metrics source flags
 var (
-	usePrometheusSource         = flag.Bool("use-prometheus-source", false, "Use Prometheus as direct metrics source instead of metrics-server or external-metrics API. Allows coexistence with KEDA.")
-	prometheusSourceAddress     = flag.String("prometheus-source-address", "", "Prometheus address for direct metrics queries. Uses --prometheus-address if not specified.")
-	prometheusSourceInsecure    = flag.Bool("prometheus-source-insecure", false, "Skip TLS verification for Prometheus metrics source.")
-	prometheusSourceTimeout     = flag.String("prometheus-source-timeout", "30s", "Query timeout for Prometheus metrics source.")
-	prometheusSourceBearerToken = flag.String("prometheus-source-bearer-token", "", "Bearer token for Prometheus metrics source authentication.")
-	prometheusSourceUsername    = flag.String("prometheus-source-username", "", "Username for Prometheus metrics source basic auth.")
-	prometheusSourcePassword    = flag.String("prometheus-source-password", "", "Password for Prometheus metrics source basic auth.")
-	prometheusCPUQuery          = flag.String("prometheus-cpu-query", "", "Custom PromQL query for CPU usage. Use {{namespace}} and {{pod}} placeholders.")
-	prometheusMemoryQuery       = flag.String("prometheus-memory-query", "", "Custom PromQL query for memory usage. Use {{namespace}} and {{pod}} placeholders.")
-	prometheusOOMQuery          = flag.String("prometheus-oom-query", "", "Custom PromQL query for OOM counter. Use {{namespace}} and {{pod}} placeholders. Enables managed language OOM support.")
+	usePrometheusSource            = flag.Bool("use-prometheus-source", false, "Use Prometheus as direct metrics source instead of metrics-server or external-metrics API. Allows coexistence with KEDA.")
+	prometheusSourceAddress        = flag.String("prometheus-source-address", "", "Prometheus address for direct metrics queries. Uses --prometheus-address if not specified.")
+	prometheusSourceInsecure       = flag.Bool("prometheus-source-insecure", false, "Skip TLS verification for Prometheus metrics source.")
+	prometheusSourceTimeout        = flag.String("prometheus-source-timeout", "30s", "Query timeout for Prometheus metrics source.")
+	prometheusSourceBearerToken    = flag.String("prometheus-source-bearer-token", "", "Bearer token for Prometheus metrics source authentication.")
+	prometheusSourceUsername       = flag.String("prometheus-source-username", "", "Username for Prometheus metrics source basic auth.")
+	prometheusSourcePassword       = flag.String("prometheus-source-password", "", "Password for Prometheus metrics source basic auth.")
+	prometheusCPUQuery             = flag.String("prometheus-cpu-query", "", "Custom PromQL query for CPU usage. Use {{namespace}} and {{pod}} placeholders.")
+	prometheusMemoryQuery          = flag.String("prometheus-memory-query", "", "Custom PromQL query for memory usage. Use {{namespace}} and {{pod}} placeholders.")
+	prometheusOOMQuery             = flag.String("prometheus-oom-query", "", "Custom PromQL query for OOM counter. Use {{namespace}} and {{pod}} placeholders. Enables managed language OOM support.")
+	prometheusSourceNamespaceLabel = flag.String("prometheus-source-namespace-label", "namespace", "Label name to look for namespaces in Prometheus metrics source results.")
+	prometheusSourcePodLabel       = flag.String("prometheus-source-pod-label", "pod", "Label name to look for pod names in Prometheus metrics source results.")
+	prometheusSourceContainerLabel = flag.String("prometheus-source-container-label", "container", "Label name to look for container names in Prometheus metrics source results.")
 )
 
 // External OOM observer flags
@@ -463,6 +466,9 @@ func createPrometheusSource(config *rest.Config, clusterState model.ClusterState
 		CPUQuery:           *prometheusCPUQuery,
 		MemoryQuery:        *prometheusMemoryQuery,
 		OOMQuery:           *prometheusOOMQuery,
+		NamespaceLabel:     *prometheusSourceNamespaceLabel,
+		PodLabel:           *prometheusSourcePodLabel,
+		ContainerLabel:     *prometheusSourceContainerLabel,
 	}
 
 	source, err := input_metrics.NewPrometheusMetricsSource(sourceConfig)

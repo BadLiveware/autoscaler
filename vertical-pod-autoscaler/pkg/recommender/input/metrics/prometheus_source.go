@@ -42,6 +42,9 @@ const (
 	defaultPromCPUQuery    = `rate(container_cpu_usage_seconds_total{namespace=~"{{namespace}}",pod=~"{{pod}}",container!="",container!="POD",image!=""}[5m])`
 	defaultPromMemoryQuery = `container_memory_working_set_bytes{namespace=~"{{namespace}}",pod=~"{{pod}}",container!="",container!="POD",image!=""}`
 	defaultPromOOMQuery    = `container_oom_events_total{namespace=~"{{namespace}}",pod=~"{{pod}}",container!="",container!="POD"}`
+	defaultNamespaceLabel  = "namespace"
+	defaultPodLabel        = "pod"
+	defaultContainerLabel  = "container"
 )
 
 // PrometheusSourceConfig configures the Prometheus metrics source.
@@ -62,6 +65,12 @@ type PrometheusSourceConfig struct {
 	OOMQuery string
 	// ClusterState for looking up VPAs and matching pods
 	ClusterState model.ClusterState
+	// NamespaceLabel specifies which label contains the namespace in Prometheus results
+	NamespaceLabel string
+	// PodLabel specifies which label contains the pod name in Prometheus results
+	PodLabel string
+	// ContainerLabel specifies which label contains the container name in Prometheus results
+	ContainerLabel string
 }
 
 // PrometheusAuth contains authentication credentials for Prometheus.
@@ -105,6 +114,15 @@ func NewPrometheusMetricsSource(config PrometheusSourceConfig) (PodMetricsLister
 	}
 	if config.OOMQuery == "" {
 		config.OOMQuery = defaultPromOOMQuery
+	}
+	if config.NamespaceLabel == "" {
+		config.NamespaceLabel = defaultNamespaceLabel
+	}
+	if config.PodLabel == "" {
+		config.PodLabel = defaultPodLabel
+	}
+	if config.ContainerLabel == "" {
+		config.ContainerLabel = defaultContainerLabel
 	}
 
 	// Create Prometheus client
@@ -299,6 +317,7 @@ func (p *prometheusMetricsSource) queryPrometheus(ctx context.Context, query str
 	queryCtx, cancel := context.WithTimeout(ctx, p.config.QueryTimeout)
 	defer cancel()
 
+	klog.V(4).InfoS("Executing Prometheus query", "query", query, "timestamp", timestamp)
 	result, warnings, err := p.client.Query(queryCtx, query, timestamp)
 	if err != nil {
 		return nil, fmt.Errorf("prometheus query failed: %w", err)
@@ -315,7 +334,7 @@ func (p *prometheusMetricsSource) queryPrometheus(ctx context.Context, query str
 
 	var metrics []prometheusMetric
 	for _, sample := range vector {
-		containerID, err := extractContainerIDFromLabels(sample.Metric)
+		containerID, err := extractContainerIDFromLabels(sample.Metric, p.config.NamespaceLabel, p.config.PodLabel, p.config.ContainerLabel)
 		if err != nil {
 			klog.V(4).InfoS("Skipping sample due to label extraction error",
 				"error", err,
@@ -349,7 +368,7 @@ func (p *prometheusMetricsSource) queryOOMCounters(ctx context.Context, query st
 
 	counters := make(map[model.ContainerID]uint64)
 	for _, sample := range vector {
-		containerID, err := extractContainerIDFromLabels(sample.Metric)
+		containerID, err := extractContainerIDFromLabels(sample.Metric, p.config.NamespaceLabel, p.config.PodLabel, p.config.ContainerLabel)
 		if err != nil {
 			klog.V(4).InfoS("Skipping OOM counter due to label extraction error",
 				"error", err,
@@ -456,20 +475,20 @@ func substituteQueryTemplate(query, namespace, podRegex string) string {
 }
 
 // extractContainerIDFromLabels extracts namespace, pod, and container from Prometheus labels.
-func extractContainerIDFromLabels(labels prommodel.Metric) (model.ContainerID, error) {
-	namespace, ok := labels["namespace"]
+func extractContainerIDFromLabels(labels prommodel.Metric, namespaceLabel, podLabel, containerLabel string) (model.ContainerID, error) {
+	namespace, ok := labels[prommodel.LabelName(namespaceLabel)]
 	if !ok {
-		return model.ContainerID{}, fmt.Errorf("missing 'namespace' label")
+		return model.ContainerID{}, fmt.Errorf("missing '%s' label", namespaceLabel)
 	}
 
-	pod, ok := labels["pod"]
+	pod, ok := labels[prommodel.LabelName(podLabel)]
 	if !ok {
-		return model.ContainerID{}, fmt.Errorf("missing 'pod' label")
+		return model.ContainerID{}, fmt.Errorf("missing '%s' label", podLabel)
 	}
 
-	container, ok := labels["container"]
+	container, ok := labels[prommodel.LabelName(containerLabel)]
 	if !ok {
-		return model.ContainerID{}, fmt.Errorf("missing 'container' label")
+		return model.ContainerID{}, fmt.Errorf("missing '%s' label", containerLabel)
 	}
 
 	return model.ContainerID{
