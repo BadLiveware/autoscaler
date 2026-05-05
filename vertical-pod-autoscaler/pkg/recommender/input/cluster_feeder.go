@@ -119,6 +119,7 @@ func (m ClusterStateFeederFactory) Make() *clusterStateFeeder {
 		vpaObjectNamespace:  m.VpaObjectNamespace,
 		perVPABackfiller:    m.PerVPABackfiller,
 		backfilledVPAs:      make(map[model.VpaID]struct{}),
+		backfillSem:         make(chan struct{}, maxConcurrentBackfills),
 	}
 }
 
@@ -231,14 +232,20 @@ type clusterStateFeeder struct {
 	ignoredNamespaces   []string
 	vpaObjectNamespace  string
 
-	// Per-VPA history backfill state. perVPABackfiller is nil when disabled.
-	// backfilledVPAs is the set of VPAs that have already had their
-	// (one-shot, fire-and-forget) backfill goroutine dispatched. The
-	// annotation is treated as immutable post-creation; we never re-run.
+	// Per-VPA history backfill. perVPABackfiller is nil when disabled.
+	// backfillSem bounds concurrency so a mass-arrival of opted-in VPAs
+	// (e.g. recovery after restart) doesn't fan out 1000 range queries
+	// against Prometheus at once.
 	perVPABackfiller *history.PerVPAProvider
 	backfillMu       sync.Mutex
 	backfilledVPAs   map[model.VpaID]struct{}
+	backfillSem      chan struct{}
 }
+
+// maxConcurrentBackfills caps how many per-VPA history backfill goroutines
+// can run at once. Each one issues a Prometheus range query over the full
+// --history-length window, so unbounded fan-out is the worst case.
+const maxConcurrentBackfills = 5
 
 func (feeder *clusterStateFeeder) InitFromHistoryProvider(historyProvider history.HistoryProvider) {
 	klog.V(3).InfoS("Initializing VPA from history provider")
@@ -481,14 +488,16 @@ func (feeder *clusterStateFeeder) LoadVPAs(ctx context.Context) {
 			if err := feeder.clusterState.DeleteVpa(vpaID); err != nil {
 				klog.ErrorS(err, "Deleting VPA failed", "vpa", klog.KRef(vpaID.Namespace, vpaID.VpaName))
 			}
+			feeder.backfillMu.Lock()
+			delete(feeder.backfilledVPAs, vpaID)
+			feeder.backfillMu.Unlock()
 		}
 	}
 	feeder.clusterState.SetObservedVPAs(vpaCRDs)
 }
 
-// maybeStartHistoryBackfill dispatches a one-shot per-VPA history backfill
-// goroutine the first time a VPA opted into history-query annotations is
-// observed. Subsequent observations of the same VPA do nothing.
+// maybeStartHistoryBackfill dispatches a one-shot backfill on first
+// observation; re-runs are skipped.
 func (feeder *clusterStateFeeder) maybeStartHistoryBackfill(vpaID model.VpaID) {
 	if feeder.perVPABackfiller == nil {
 		return
@@ -512,6 +521,9 @@ func (feeder *clusterStateFeeder) maybeStartHistoryBackfill(vpaID model.VpaID) {
 }
 
 func (feeder *clusterStateFeeder) runHistoryBackfill(vpaID model.VpaID) {
+	feeder.backfillSem <- struct{}{}
+	defer func() { <-feeder.backfillSem }()
+
 	vpa, ok := feeder.clusterState.VPAs()[vpaID]
 	if !ok {
 		return
@@ -528,7 +540,7 @@ func (feeder *clusterStateFeeder) runHistoryBackfill(vpaID model.VpaID) {
 		for ctrName, sampleList := range ph.Samples {
 			ctrID := model.ContainerID{PodID: podID, ContainerName: ctrName}
 			if err := feeder.clusterState.AddOrUpdateContainer(ctrID, nil); err != nil {
-				klog.V(0).InfoS("Per-VPA backfill: failed to add container", "container", ctrID, "error", err)
+				klog.ErrorS(err, "Per-VPA backfill: failed to add container", "container", ctrID)
 				continue
 			}
 			for _, sample := range sampleList {

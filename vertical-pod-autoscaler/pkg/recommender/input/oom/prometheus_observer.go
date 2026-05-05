@@ -133,12 +133,26 @@ func (o *PrometheusObserver) Run(ctx context.Context) {
 }
 
 func (o *PrometheusObserver) pollOnce(ctx context.Context) {
-	for _, vpa := range o.clusterState.VPAs() {
+	vpas := o.clusterState.VPAs()
+	for _, vpa := range vpas {
 		counter := annotations.OOMCounterMetric(vpa.Annotations)
 		if counter == "" {
 			continue
 		}
 		o.pollVPA(ctx, vpa, counter)
+	}
+	o.pruneSeen(vpas)
+}
+
+// pruneSeen drops first-poll-baseline entries for VPAs that no longer exist.
+// Without this the seen map grows unboundedly on VPA churn.
+func (o *PrometheusObserver) pruneSeen(current map[model.VpaID]*model.Vpa) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for id := range o.seen {
+		if _, ok := current[id]; !ok {
+			delete(o.seen, id)
+		}
 	}
 }
 

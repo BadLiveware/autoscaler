@@ -67,12 +67,14 @@ func vpa(ns, name string, ann map[string]string) *model.Vpa {
 	}
 }
 
+// fixedTestTime keeps the matrix helper deterministic.
+var fixedTestTime = time.Unix(1_700_000_000, 0)
+
 func matrix(podName, ctrName string, values ...float64) prommodel.Matrix {
 	pairs := make([]prommodel.SamplePair, len(values))
-	now := time.Now()
 	for i, v := range values {
 		pairs[i] = prommodel.SamplePair{
-			Timestamp: prommodel.TimeFromUnixNano(now.Add(-time.Duration(len(values)-i) * time.Hour).UnixNano()),
+			Timestamp: prommodel.TimeFromUnixNano(fixedTestTime.Add(-time.Duration(len(values)-i) * time.Hour).UnixNano()),
 			Value:     prommodel.SampleValue(v),
 		}
 	}
