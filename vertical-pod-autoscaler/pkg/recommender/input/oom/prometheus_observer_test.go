@@ -22,9 +22,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	prometheusv1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	prommodel "github.com/prometheus/common/model"
+	"github.com/stretchr/testify/assert"
 
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/model"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/utils/annotations"
@@ -59,7 +59,7 @@ type fakeClusterState struct {
 	pods map[model.PodID]*model.PodState
 }
 
-func (f *fakeClusterState) VPAs() map[model.VpaID]*model.Vpa     { return f.vpas }
+func (f *fakeClusterState) VPAs() map[model.VpaID]*model.Vpa      { return f.vpas }
 func (f *fakeClusterState) Pods() map[model.PodID]*model.PodState { return f.pods }
 
 func vpaWithOOMAnnotation(ns, name, metric string) *model.Vpa {

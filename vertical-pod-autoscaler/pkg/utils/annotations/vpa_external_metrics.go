@@ -17,6 +17,7 @@ limitations under the License.
 package annotations
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -29,26 +30,26 @@ const (
 	// metric source overrides. Pick a domain at fork time.
 	ExternalMetricsAnnotationPrefix = "external.vpa.k8s.io/"
 
-	// ExternalCPUMetricAnnotation, when set on a VPA, names the
-	// external.metrics.k8s.io metric used as CPU usage for that VPA's pods.
+	// ExternalCPUMetricAnnotation names the external.metrics.k8s.io metric
+	// used as CPU usage for the annotated VPA's pods.
 	ExternalCPUMetricAnnotation = ExternalMetricsAnnotationPrefix + "cpu-metric"
 
-	// ExternalMemoryMetricAnnotation, when set on a VPA, names the
-	// external.metrics.k8s.io metric used as memory usage for that VPA's pods.
+	// ExternalMemoryMetricAnnotation names the external.metrics.k8s.io
+	// metric used as memory usage for the annotated VPA's pods.
 	ExternalMemoryMetricAnnotation = ExternalMetricsAnnotationPrefix + "memory-metric"
 
-	// OOMCounterMetricAnnotation, when set on a VPA, names a Prometheus
-	// counter metric whose increases are treated as OOM events for the VPA's
-	// pods. Use case: .NET OutOfMemoryException, where the runtime catches
-	// the failure and the container does not OOMKill.
+	// OOMCounterMetricAnnotation names a Prometheus counter metric whose
+	// increases are treated as OOM events for the annotated VPA's pods.
+	// Use case: .NET OutOfMemoryException, where the runtime catches the
+	// failure and the container does not OOMKill.
 	OOMCounterMetricAnnotation = ExternalMetricsAnnotationPrefix + "oom-counter-metric"
 
-	// HistoryQueryCPUAnnotation, when set on a VPA, is a PromQL query used
-	// for one-shot CPU history backfill on the VPA's first observation.
+	// HistoryQueryCPUAnnotation is a PromQL query used for one-shot CPU
+	// history backfill on the annotated VPA's first observation.
 	HistoryQueryCPUAnnotation = ExternalMetricsAnnotationPrefix + "history-query-cpu"
 
-	// HistoryQueryMemoryAnnotation, when set on a VPA, is a PromQL query used
-	// for one-shot memory history backfill on the VPA's first observation.
+	// HistoryQueryMemoryAnnotation is a PromQL query used for one-shot
+	// memory history backfill on the annotated VPA's first observation.
 	HistoryQueryMemoryAnnotation = ExternalMetricsAnnotationPrefix + "history-query-memory"
 )
 
@@ -125,7 +126,7 @@ func HasHistoryQuery(annotations map[string]string) bool {
 func ParseInstantVectorSelector(s string) (metricName string, selector labels.Selector, err error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return "", nil, fmt.Errorf("empty selector")
+		return "", nil, errors.New("empty selector")
 	}
 	open := strings.IndexByte(s, '{')
 	if open < 0 {
@@ -140,7 +141,7 @@ func ParseInstantVectorSelector(s string) (metricName string, selector labels.Se
 	}
 	matchers := s[open+1 : len(s)-1]
 	if strings.Contains(matchers, "=~") || strings.Contains(matchers, "!~") {
-		return "", nil, fmt.Errorf("regex matchers (=~, !~) not supported; use exact = / != matches")
+		return "", nil, errors.New("regex matchers (=~, !~) not supported; use exact = / != matches")
 	}
 	// PromQL quotes label values; labels.Selector does not. Strip the quotes.
 	matchers = stripQuotes(matchers)
