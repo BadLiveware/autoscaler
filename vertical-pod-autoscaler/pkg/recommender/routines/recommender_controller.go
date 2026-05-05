@@ -112,8 +112,16 @@ func NewRecommenderController(
 		klog.V(1).InfoS("Using External Metrics", "options", externalClientOptions)
 		source = input_metrics.NewExternalClient(kubeConfig, clusterState, *externalClientOptions)
 	} else {
-		klog.V(1).InfoS("Using Metrics Server")
-		source = input_metrics.NewPodMetricsesSource(resourceclient.NewForConfigOrDie(kubeConfig))
+		// Mixed mode: metrics-server is the global default, but VPAs that opt
+		// in via per-VPA annotations are served by external metrics.
+		defaultSource := input_metrics.NewPodMetricsesSource(resourceclient.NewForConfigOrDie(kubeConfig))
+		externalClientOptions := &input_metrics.ExternalClientOptions{
+			ContainerNameLabel: config.CtrNameLabel,
+			AnnotatedVPAsOnly:  true,
+		}
+		externalSource := input_metrics.NewExternalClient(kubeConfig, clusterState, *externalClientOptions)
+		klog.V(1).InfoS("Using Metrics Server with per-VPA external metrics overrides")
+		source = input_metrics.NewMultiSource(defaultSource, externalSource)
 	}
 
 	ignoredNamespaces := strings.Split(commonFlags.IgnoredVpaObjectNamespaces, ",")

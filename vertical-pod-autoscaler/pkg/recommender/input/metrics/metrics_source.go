@@ -31,6 +31,7 @@ import (
 	"k8s.io/metrics/pkg/client/external_metrics"
 
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/model"
+	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/utils/annotations"
 )
 
 // PodMetricsLister wraps both metrics-client and External Metrics
@@ -65,6 +66,12 @@ type ExternalClientOptions struct {
 	ResourceMetrics map[corev1.ResourceName]string
 	// Label to use for the container name.
 	ContainerNameLabel string
+	// AnnotatedVPAsOnly, when true, restricts the client to only iterate VPAs
+	// that opt into external metrics via annotations. Used when the client is
+	// composed inside a multiSource alongside metrics-server, so non-annotated
+	// VPAs are served by metrics-server instead of being silently skipped or
+	// double-counted.
+	AnnotatedVPAsOnly bool
 }
 
 // NewExternalClient returns a Source for an External Metrics Client.
@@ -93,6 +100,15 @@ func (s *externalMetricsClient) List(ctx context.Context, namespace string, opts
 			continue
 		}
 
+		if s.options.AnnotatedVPAsOnly && !annotations.HasExternalMetricOverride(vpa.Annotations) {
+			continue
+		}
+
+		resourceMetrics := s.resourceMetricsForVPA(vpa)
+		if len(resourceMetrics) == 0 {
+			continue
+		}
+
 		nsClient := s.externalClient.NamespacedMetrics(vpa.ID.Namespace)
 		pods := s.clusterState.GetMatchingPods(vpa)
 
@@ -110,7 +126,7 @@ func (s *externalMetricsClient) List(ctx context.Context, namespace string, opts
 			}
 			// Query each resource in turn, then assemble back to a single []ContainerMetrics.
 			containerMetrics := make(map[string]corev1.ResourceList)
-			for resourceName, metricName := range s.options.ResourceMetrics {
+			for resourceName, metricName := range resourceMetrics {
 				m, err := nsClient.List(metricName, selector)
 				if err != nil {
 					return nil, err
@@ -142,4 +158,24 @@ func (s *externalMetricsClient) List(ctx context.Context, namespace string, opts
 		}
 	}
 	return &result, nil
+}
+
+// resourceMetricsForVPA resolves the external-metrics metric name to query for
+// each resource for the given VPA. Per-resource fallback order:
+//  1. VPA annotation (per-resource)
+//  2. Global flag default (s.options.ResourceMetrics)
+//
+// Resources with no source from either path are omitted from the returned map.
+func (s *externalMetricsClient) resourceMetricsForVPA(vpa *model.Vpa) map[corev1.ResourceName]string {
+	out := make(map[corev1.ResourceName]string, 2)
+	for _, resource := range []corev1.ResourceName{corev1.ResourceCPU, corev1.ResourceMemory} {
+		if metric := annotations.ExternalMetricForResource(vpa.Annotations, resource); metric != "" {
+			out[resource] = metric
+			continue
+		}
+		if metric, ok := s.options.ResourceMetrics[resource]; ok && metric != "" {
+			out[resource] = metric
+		}
+	}
+	return out
 }
