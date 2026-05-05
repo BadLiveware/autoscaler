@@ -25,7 +25,7 @@ helm upgrade -i vertical-pod-autoscaler autoscalers/vertical-pod-autoscaler
 
 | Name | Email | Url |
 | ---- | ------ | --- |
-| tradera/platform |  | <https://github.com/tradera> |
+| tradera |  | <https://github.com/tradera> |
 
 ## Webhook Management
 The admission controller requires a `MutatingWebhookConfiguration` and TLS certificates. This chart supports two mutually exclusive modes:
