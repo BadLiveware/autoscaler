@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -44,6 +45,7 @@ import (
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/model"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/target"
 	controllerfetcher "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/target/controller_fetcher"
+	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/utils/annotations"
 	metrics_recommender "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/utils/metrics/recommender"
 )
 
@@ -91,6 +93,11 @@ type ClusterStateFeederFactory struct {
 	RecommenderName     string
 	IgnoredNamespaces   []string
 	VpaObjectNamespace  string
+	// PerVPABackfiller is optional. When non-nil, VPAs annotated with
+	// history-query-{cpu,memory} get a one-shot Prometheus range query at
+	// first observation, fed into clusterState the same way the cluster-wide
+	// history provider feeds InitFromHistoryProvider.
+	PerVPABackfiller *history.PerVPAProvider
 }
 
 // Make creates new ClusterStateFeeder with internal data providers, based on kube client.
@@ -110,6 +117,8 @@ func (m ClusterStateFeederFactory) Make() *clusterStateFeeder {
 		recommenderName:     m.RecommenderName,
 		ignoredNamespaces:   m.IgnoredNamespaces,
 		vpaObjectNamespace:  m.VpaObjectNamespace,
+		perVPABackfiller:    m.PerVPABackfiller,
+		backfilledVPAs:      make(map[model.VpaID]struct{}),
 	}
 }
 
@@ -221,6 +230,14 @@ type clusterStateFeeder struct {
 	recommenderName     string
 	ignoredNamespaces   []string
 	vpaObjectNamespace  string
+
+	// Per-VPA history backfill state. perVPABackfiller is nil when disabled.
+	// backfilledVPAs is the set of VPAs that have already had their
+	// (one-shot, fire-and-forget) backfill goroutine dispatched. The
+	// annotation is treated as immutable post-creation; we never re-run.
+	perVPABackfiller *history.PerVPAProvider
+	backfillMu       sync.Mutex
+	backfilledVPAs   map[model.VpaID]struct{}
 }
 
 func (feeder *clusterStateFeeder) InitFromHistoryProvider(historyProvider history.HistoryProvider) {
@@ -453,6 +470,8 @@ func (feeder *clusterStateFeeder) LoadVPAs(ctx context.Context) {
 					feeder.clusterState.VPAs()[vpaID].SetCondition(condition.conditionType, true, "", condition.message)
 				}
 			}
+
+			feeder.maybeStartHistoryBackfill(vpaID)
 		}
 	}
 	// Delete non-existent VPAs from the model.
@@ -465,6 +484,66 @@ func (feeder *clusterStateFeeder) LoadVPAs(ctx context.Context) {
 		}
 	}
 	feeder.clusterState.SetObservedVPAs(vpaCRDs)
+}
+
+// maybeStartHistoryBackfill dispatches a one-shot per-VPA history backfill
+// goroutine the first time a VPA opted into history-query annotations is
+// observed. Subsequent observations of the same VPA do nothing.
+func (feeder *clusterStateFeeder) maybeStartHistoryBackfill(vpaID model.VpaID) {
+	if feeder.perVPABackfiller == nil {
+		return
+	}
+	vpa, ok := feeder.clusterState.VPAs()[vpaID]
+	if !ok {
+		return
+	}
+	if !annotations.HasHistoryQuery(vpa.Annotations) {
+		return
+	}
+	feeder.backfillMu.Lock()
+	if _, already := feeder.backfilledVPAs[vpaID]; already {
+		feeder.backfillMu.Unlock()
+		return
+	}
+	feeder.backfilledVPAs[vpaID] = struct{}{}
+	feeder.backfillMu.Unlock()
+
+	go feeder.runHistoryBackfill(vpaID)
+}
+
+func (feeder *clusterStateFeeder) runHistoryBackfill(vpaID model.VpaID) {
+	vpa, ok := feeder.clusterState.VPAs()[vpaID]
+	if !ok {
+		return
+	}
+	klog.V(2).InfoS("Per-VPA history backfill: starting", "vpa", klog.KRef(vpaID.Namespace, vpaID.VpaName))
+	hist, err := feeder.perVPABackfiller.GetVPAHistory(context.Background(), vpa)
+	if err != nil {
+		klog.ErrorS(err, "Per-VPA history backfill failed", "vpa", klog.KRef(vpaID.Namespace, vpaID.VpaName))
+		return
+	}
+	var samples int
+	for podID, ph := range hist {
+		feeder.clusterState.AddOrUpdatePod(podID, ph.LastLabels, corev1.PodUnknown)
+		for ctrName, sampleList := range ph.Samples {
+			ctrID := model.ContainerID{PodID: podID, ContainerName: ctrName}
+			if err := feeder.clusterState.AddOrUpdateContainer(ctrID, nil); err != nil {
+				klog.V(0).InfoS("Per-VPA backfill: failed to add container", "container", ctrID, "error", err)
+				continue
+			}
+			for _, sample := range sampleList {
+				if err := feeder.clusterState.AddSample(&model.ContainerUsageSampleWithKey{
+					ContainerUsageSample: sample,
+					Container:            ctrID,
+				}); err != nil {
+					klog.V(4).InfoS("Per-VPA backfill: failed to add sample", "sample", sample, "error", err)
+					continue
+				}
+				samples++
+			}
+		}
+	}
+	klog.V(2).InfoS("Per-VPA history backfill: done", "vpa", klog.KRef(vpaID.Namespace, vpaID.VpaName), "pods", len(hist), "samples", samples)
 }
 
 // LoadPods loads pod into the cluster state.

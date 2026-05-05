@@ -22,6 +22,8 @@ import (
 	"strings"
 	"time"
 
+	prometheusv1 "github.com/prometheus/client_golang/api/prometheus/v1"
+	prommodel "github.com/prometheus/common/model"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/informers"
 	kube_client "k8s.io/client-go/kubernetes"
@@ -79,7 +81,28 @@ func NewRecommenderController(
 	controllerFetcher := controllerfetcher.NewControllerFetcher(kubeConfig, kubeClient, factory, scaleCacheEntryFreshnessTime, scaleCacheEntryLifetime, scaleCacheEntryJitterFactor, stopCh)
 	podLister, oomObserver := input.NewPodListerAndOOMObserver(ctx, kubeClient, commonFlags.VpaObjectNamespace, stopCh)
 
-	if err := startPrometheusOOMObserver(ctx, config, clusterState, oomObserver.GetObservedOomsChannel()); err != nil {
+	// One Prometheus client serves both the per-VPA OOM observer and the
+	// per-VPA history backfiller. Both features are opt-in via VPA
+	// annotations, so no annotated VPAs means no requests.
+	var promAPI prometheusv1.API
+	if config.PrometheusAddress != "" {
+		var err error
+		promAPI, err = history.NewPrometheusAPI(config.PrometheusAddress, config.PrometheusInsecure, history.PrometheusCredentials{
+			BearerToken: config.PrometheusBearerToken,
+			Username:    config.Username,
+			Password:    config.Password,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("init prometheus client: %w", err)
+		}
+	}
+
+	if err := startPrometheusOOMObserver(ctx, config, clusterState, oomObserver.GetObservedOomsChannel(), promAPI); err != nil {
+		return nil, err
+	}
+
+	perVPABackfiller, err := newPerVPABackfiller(config, promAPI)
+	if err != nil {
 		return nil, err
 	}
 
@@ -147,6 +170,7 @@ func NewRecommenderController(
 		RecommenderName:     config.RecommenderName,
 		IgnoredNamespaces:   ignoredNamespaces,
 		VpaObjectNamespace:  commonFlags.VpaObjectNamespace,
+		PerVPABackfiller:    perVPABackfiller,
 	}.Make()
 	controllerFetcher.Start(ctx, scaleCacheLoopPeriod)
 
@@ -218,27 +242,18 @@ func (c *RecommenderController) Run(ctx context.Context) error {
 // runtime-internal OOMs that don't trigger a container OOMKill (e.g. .NET
 // OutOfMemoryException).
 //
-// The observer is always started when a Prometheus address is configured
-// (which is the default). Without any annotated VPAs it issues no queries —
-// the cost is one client construction and an idle ticker.
-func startPrometheusOOMObserver(ctx context.Context, config *recommender_config.RecommenderConfig, clusterState model.ClusterState, oomChan chan<- oom.OomInfo) error {
-	if config.PrometheusAddress == "" {
+// promAPI is supplied by the caller (nil = disabled). Without any annotated
+// VPAs the observer issues no queries — the cost is an idle ticker.
+func startPrometheusOOMObserver(ctx context.Context, config *recommender_config.RecommenderConfig, clusterState model.ClusterState, oomChan chan<- oom.OomInfo, promAPI prometheusv1.API) error {
+	if promAPI == nil {
 		return nil
-	}
-	api, err := history.NewPrometheusAPI(config.PrometheusAddress, config.PrometheusInsecure, history.PrometheusCredentials{
-		BearerToken: config.PrometheusBearerToken,
-		Username:    config.Username,
-		Password:    config.Password,
-	})
-	if err != nil {
-		return fmt.Errorf("init prometheus client for OOM observer: %w", err)
 	}
 	queryTimeout, err := time.ParseDuration(config.QueryTimeout)
 	if err != nil {
 		return fmt.Errorf("parse query-timeout for OOM observer: %w", err)
 	}
 	observer := oom.NewPrometheusObserver(oom.PrometheusObserverConfig{
-		API:            api,
+		API:            promAPI,
 		ClusterState:   clusterState,
 		OomChan:        oomChan,
 		PollInterval:   config.PrometheusOOMObserverInterval,
@@ -249,6 +264,34 @@ func startPrometheusOOMObserver(ctx context.Context, config *recommender_config.
 	go observer.Run(ctx)
 	klog.V(1).InfoS("Started Prometheus OOM observer", "interval", config.PrometheusOOMObserverInterval, "address", config.PrometheusAddress)
 	return nil
+}
+
+// newPerVPABackfiller builds the optional per-VPA history backfiller. Returns
+// nil (and no error) when promAPI is nil — VPAs without history annotations
+// see no behavior change.
+func newPerVPABackfiller(config *recommender_config.RecommenderConfig, promAPI prometheusv1.API) (*history.PerVPAProvider, error) {
+	if promAPI == nil {
+		return nil, nil
+	}
+	queryTimeout, err := time.ParseDuration(config.QueryTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("parse query-timeout for backfiller: %w", err)
+	}
+	historyDuration, err := prommodel.ParseDuration(config.HistoryLength)
+	if err != nil {
+		return nil, fmt.Errorf("parse history-length for backfiller: %w", err)
+	}
+	historyResolution, err := prommodel.ParseDuration(config.HistoryResolution)
+	if err != nil {
+		return nil, fmt.Errorf("parse history-resolution for backfiller: %w", err)
+	}
+	return history.NewPerVPAProvider(promAPI, history.PerVPAProviderOpts{
+		QueryTimeout:      queryTimeout,
+		HistoryDuration:   time.Duration(historyDuration),
+		HistoryResolution: time.Duration(historyResolution),
+		PodLabel:          config.CtrPodNameLabel,
+		ContainerLabel:    config.CtrNameLabel,
+	}), nil
 }
 
 func initGlobalMaxAllowed(config *recommender_config.RecommenderConfig) corev1.ResourceList {

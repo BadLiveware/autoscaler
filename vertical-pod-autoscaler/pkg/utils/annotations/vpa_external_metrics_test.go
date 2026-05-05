@@ -98,6 +98,28 @@ func TestOOMCounterMetric(t *testing.T) {
 	}
 }
 
+func TestHasHistoryQuery(t *testing.T) {
+	cases := []struct {
+		name        string
+		annotations map[string]string
+		want        bool
+	}{
+		{name: "nil", annotations: nil, want: false},
+		{name: "empty", annotations: map[string]string{}, want: false},
+		{name: "only cpu", annotations: map[string]string{HistoryQueryCPUAnnotation: "x"}, want: true},
+		{name: "only memory", annotations: map[string]string{HistoryQueryMemoryAnnotation: "x"}, want: true},
+		{name: "both", annotations: map[string]string{HistoryQueryCPUAnnotation: "a", HistoryQueryMemoryAnnotation: "b"}, want: true},
+		{name: "empty value", annotations: map[string]string{HistoryQueryCPUAnnotation: ""}, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := HasHistoryQuery(tc.annotations); got != tc.want {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestHistoryQueryForResource(t *testing.T) {
 	ann := map[string]string{
 		HistoryQueryCPUAnnotation:    "rate(cpu[5m])",

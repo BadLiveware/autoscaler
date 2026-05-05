@@ -98,3 +98,13 @@ func HistoryQueryForResource(annotations map[string]string, resource corev1.Reso
 	}
 	return ""
 }
+
+// HasHistoryQuery reports whether a VPA opts into per-VPA history backfill
+// for at least one resource.
+func HasHistoryQuery(annotations map[string]string) bool {
+	if annotations == nil {
+		return false
+	}
+	return annotations[HistoryQueryCPUAnnotation] != "" ||
+		annotations[HistoryQueryMemoryAnnotation] != ""
+}
