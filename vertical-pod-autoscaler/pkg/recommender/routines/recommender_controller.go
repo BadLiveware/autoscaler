@@ -241,13 +241,13 @@ func startPrometheusOOMObserver(ctx context.Context, config *recommender_config.
 		API:            api,
 		ClusterState:   clusterState,
 		OomChan:        oomChan,
-		PollInterval:   config.MetricsFetcherInterval,
+		PollInterval:   config.PrometheusOOMObserverInterval,
 		QueryTimeout:   queryTimeout,
 		PodLabel:       config.CtrPodNameLabel,
 		ContainerLabel: config.CtrNameLabel,
 	})
 	go observer.Run(ctx)
-	klog.V(1).InfoS("Started Prometheus OOM observer", "interval", config.MetricsFetcherInterval, "address", config.PrometheusAddress)
+	klog.V(1).InfoS("Started Prometheus OOM observer", "interval", config.PrometheusOOMObserverInterval, "address", config.PrometheusAddress)
 	return nil
 }
 
