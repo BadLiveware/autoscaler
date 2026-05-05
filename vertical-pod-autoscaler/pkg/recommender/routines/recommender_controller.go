@@ -18,6 +18,7 @@ package routines
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -34,6 +35,7 @@ import (
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input/history"
 	input_metrics "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input/metrics"
+	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/input/oom"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/logic"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/model"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/target"
@@ -76,6 +78,10 @@ func NewRecommenderController(
 	clusterState := model.NewClusterState(aggregateContainerStateGCInterval)
 	controllerFetcher := controllerfetcher.NewControllerFetcher(kubeConfig, kubeClient, factory, scaleCacheEntryFreshnessTime, scaleCacheEntryLifetime, scaleCacheEntryJitterFactor, stopCh)
 	podLister, oomObserver := input.NewPodListerAndOOMObserver(ctx, kubeClient, commonFlags.VpaObjectNamespace, stopCh)
+
+	if err := startPrometheusOOMObserver(ctx, config, clusterState, oomObserver.GetObservedOomsChannel()); err != nil {
+		return nil, err
+	}
 
 	model.InitializeAggregationsConfig(model.NewAggregationsConfig(
 		config.MemoryAggregationInterval,
@@ -203,6 +209,46 @@ func (c *RecommenderController) Run(ctx context.Context) error {
 			c.healthCheck.UpdateLastActivity()
 		}
 	}
+}
+
+// startPrometheusOOMObserver wires a Prometheus-backed OOM observer that
+// complements the event-driven one. It polls the configured Prometheus
+// instance for per-VPA OOM-counter annotations and writes synthetic OomInfo
+// events into the shared channel, so VPA's bump-up logic can react to
+// runtime-internal OOMs that don't trigger a container OOMKill (e.g. .NET
+// OutOfMemoryException).
+//
+// The observer is always started when a Prometheus address is configured
+// (which is the default). Without any annotated VPAs it issues no queries —
+// the cost is one client construction and an idle ticker.
+func startPrometheusOOMObserver(ctx context.Context, config *recommender_config.RecommenderConfig, clusterState model.ClusterState, oomChan chan<- oom.OomInfo) error {
+	if config.PrometheusAddress == "" {
+		return nil
+	}
+	api, err := history.NewPrometheusAPI(config.PrometheusAddress, config.PrometheusInsecure, history.PrometheusCredentials{
+		BearerToken: config.PrometheusBearerToken,
+		Username:    config.Username,
+		Password:    config.Password,
+	})
+	if err != nil {
+		return fmt.Errorf("init prometheus client for OOM observer: %w", err)
+	}
+	queryTimeout, err := time.ParseDuration(config.QueryTimeout)
+	if err != nil {
+		return fmt.Errorf("parse query-timeout for OOM observer: %w", err)
+	}
+	observer := oom.NewPrometheusObserver(oom.PrometheusObserverConfig{
+		API:            api,
+		ClusterState:   clusterState,
+		OomChan:        oomChan,
+		PollInterval:   config.MetricsFetcherInterval,
+		QueryTimeout:   queryTimeout,
+		PodLabel:       config.CtrPodNameLabel,
+		ContainerLabel: config.CtrNameLabel,
+	})
+	go observer.Run(ctx)
+	klog.V(1).InfoS("Started Prometheus OOM observer", "interval", config.MetricsFetcherInterval, "address", config.PrometheusAddress)
+	return nil
 }
 
 func initGlobalMaxAllowed(config *recommender_config.RecommenderConfig) corev1.ResourceList {
