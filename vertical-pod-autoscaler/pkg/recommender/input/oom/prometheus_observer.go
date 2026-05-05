@@ -43,7 +43,6 @@ type promQueryAPI interface {
 // future ClusterState additions.
 type clusterStateView interface {
 	VPAs() map[model.VpaID]*model.Vpa
-	GetMatchingPods(vpa *model.Vpa) []model.PodID
 	Pods() map[model.PodID]*model.PodState
 }
 
@@ -135,11 +134,11 @@ func (o *PrometheusObserver) Run(ctx context.Context) {
 func (o *PrometheusObserver) pollOnce(ctx context.Context) {
 	vpas := o.clusterState.VPAs()
 	for _, vpa := range vpas {
-		counter := annotations.OOMCounterMetric(vpa.Annotations)
-		if counter == "" {
+		selector := annotations.OOMCounterMetric(vpa.Annotations)
+		if selector == "" {
 			continue
 		}
-		o.pollVPA(ctx, vpa, counter)
+		o.pollVPA(ctx, vpa, selector)
 	}
 	o.pruneSeen(vpas)
 }
@@ -156,7 +155,12 @@ func (o *PrometheusObserver) pruneSeen(current map[model.VpaID]*model.Vpa) {
 	}
 }
 
-func (o *PrometheusObserver) pollVPA(ctx context.Context, vpa *model.Vpa, counter string) {
+// pollVPA queries Prometheus for the counter selector annotated on this VPA.
+// The selector is the user's instant vector selector (e.g.
+// `dotnet_oome{deployment="api"}`); we only wrap it with sum-by + increase().
+// We do NOT additionally filter by VPA pod selector — the user's matchers
+// own scoping.
+func (o *PrometheusObserver) pollVPA(ctx context.Context, vpa *model.Vpa, selector string) {
 	queryCtx, cancel := context.WithTimeout(ctx, o.queryTimeout)
 	defer cancel()
 
@@ -164,7 +168,7 @@ func (o *PrometheusObserver) pollVPA(ctx context.Context, vpa *model.Vpa, counte
 	// when the counter exposes orthogonal labels (e.g. exception type).
 	query := fmt.Sprintf(
 		"sum by (%s, %s) (increase(%s[%s]))",
-		o.podLabel, o.containerLabel, counter, prommodel.Duration(o.pollInterval).String(),
+		o.podLabel, o.containerLabel, selector, prommodel.Duration(o.pollInterval).String(),
 	)
 
 	val, warns, err := o.promAPI.Query(queryCtx, query, time.Now())
@@ -192,20 +196,12 @@ func (o *PrometheusObserver) pollVPA(ctx context.Context, vpa *model.Vpa, counte
 		return
 	}
 
-	matchingPods := o.clusterState.GetMatchingPods(vpa)
-	podSet := make(map[string]struct{}, len(matchingPods))
-	for _, pid := range matchingPods {
-		podSet[pid.PodName] = struct{}{}
-	}
 	pods := o.clusterState.Pods()
 
 	for _, sample := range samples {
 		podName := string(sample.Metric[prommodel.LabelName(o.podLabel)])
 		ctrName := string(sample.Metric[prommodel.LabelName(o.containerLabel)])
 		if podName == "" || ctrName == "" {
-			continue
-		}
-		if _, matches := podSet[podName]; !matches {
 			continue
 		}
 		// floor: increase() can return small fractional values across rate

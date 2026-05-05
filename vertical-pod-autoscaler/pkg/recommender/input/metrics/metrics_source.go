@@ -22,8 +22,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 	"k8s.io/metrics/pkg/apis/metrics/v1beta1"
@@ -63,8 +61,15 @@ type externalMetricsClient struct {
 
 // ExternalClientOptions specifies parameters for using an External Metrics Client.
 type ExternalClientOptions struct {
+	// ResourceMetrics is the cluster-wide default metric selector per resource,
+	// applied when a VPA does not set the per-resource annotation. The value
+	// is parsed as a Prometheus instant vector selector
+	// (e.g. `metric_name{matcher,...}`); a bare metric name is equivalent to
+	// `metric_name{}`.
 	ResourceMetrics map[corev1.ResourceName]string
-	// Label to use for the container name.
+	// PodNameLabel and ContainerNameLabel are the metric label names used to
+	// attribute returned samples back to a (pod, container).
+	PodNameLabel       string
 	ContainerNameLabel string
 	// AnnotatedVPAsOnly, when true, restricts the client to only iterate VPAs
 	// that opt into external metrics via annotations. Used when the client is
@@ -104,78 +109,90 @@ func (s *externalMetricsClient) List(ctx context.Context, namespace string, opts
 			continue
 		}
 
-		resourceMetrics := s.resourceMetricsForVPA(vpa)
-		if len(resourceMetrics) == 0 {
-			continue
-		}
-
-		nsClient := s.externalClient.NamespacedMetrics(vpa.ID.Namespace)
-		pods := s.clusterState.GetMatchingPods(vpa)
-
-		for _, pod := range pods {
-			podNameReq, err := labels.NewRequirement("pod", selection.Equals, []string{pod.PodName})
-			if err != nil {
-				return nil, err
-			}
-			selector := vpa.PodSelector.Add(*podNameReq)
-			podMets := v1beta1.PodMetrics{
-				TypeMeta:   metav1.TypeMeta{},
-				ObjectMeta: metav1.ObjectMeta{Namespace: vpa.ID.Namespace, Name: pod.PodName},
-				Window:     metav1.Duration{},
-				Containers: make([]v1beta1.ContainerMetrics, 0),
-			}
-			// Query each resource in turn, then assemble back to a single []ContainerMetrics.
-			containerMetrics := make(map[string]corev1.ResourceList)
-			for resourceName, metricName := range resourceMetrics {
-				m, err := nsClient.List(metricName, selector)
-				if err != nil {
-					return nil, err
-				}
-				if m == nil || len(m.Items) == 0 {
-					klog.V(4).InfoS("External Metrics Query for VPA: No items", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName), "resource", resourceName, "metric", metricName)
-					continue
-				}
-				klog.V(4).InfoS("External Metrics Query for VPA", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName), "resource", resourceName, "metric", metricName, "itemCount", len(m.Items), "firstItem", m.Items[0])
-				podMets.Timestamp = m.Items[0].Timestamp
-				if m.Items[0].WindowSeconds != nil {
-					podMets.Window = metav1.Duration{Duration: time.Duration(*m.Items[0].WindowSeconds) * time.Second}
-				}
-				for _, val := range m.Items {
-					ctrName, hasCtrName := val.MetricLabels[s.options.ContainerNameLabel]
-					if !hasCtrName {
-						continue
-					}
-					if containerMetrics[ctrName] == nil {
-						containerMetrics[ctrName] = make(corev1.ResourceList)
-					}
-					containerMetrics[ctrName][resourceName] = val.Value
-				}
-			}
-			for cname, res := range containerMetrics {
-				podMets.Containers = append(podMets.Containers, v1beta1.ContainerMetrics{Name: cname, Usage: res})
-			}
-			result.Items = append(result.Items, podMets)
-		}
+		s.appendVPASamples(vpa, &result)
 	}
 	return &result, nil
 }
 
-// resourceMetricsForVPA resolves the external-metrics metric name to query for
-// each resource for the given VPA. Per-resource fallback order:
-//  1. VPA annotation (per-resource)
-//  2. Global flag default (s.options.ResourceMetrics)
-//
-// Resources with no source from either path are omitted from the returned map.
-func (s *externalMetricsClient) resourceMetricsForVPA(vpa *model.Vpa) map[corev1.ResourceName]string {
-	out := make(map[corev1.ResourceName]string, 2)
+// appendVPASamples issues one external-metrics query per opted-in resource
+// (no per-pod fan-out and no VPA pod-selector filtering — the caller's
+// PromQL-style annotation, or the global flag default, owns scoping). Result
+// items are bucketed into PodMetrics keyed by the configured pod label.
+func (s *externalMetricsClient) appendVPASamples(vpa *model.Vpa, out *v1beta1.PodMetricsList) {
+	type ctrKey struct{ pod, container string }
+	usage := make(map[ctrKey]corev1.ResourceList)
+	var window metav1.Duration
+	var timestamp metav1.Time
+
+	nsClient := s.externalClient.NamespacedMetrics(vpa.ID.Namespace)
+
 	for _, resource := range []corev1.ResourceName{corev1.ResourceCPU, corev1.ResourceMemory} {
-		if metric := annotations.ExternalMetricForResource(vpa.Annotations, resource); metric != "" {
-			out[resource] = metric
+		raw := s.selectorStringFor(vpa, resource)
+		if raw == "" {
 			continue
 		}
-		if metric, ok := s.options.ResourceMetrics[resource]; ok && metric != "" {
-			out[resource] = metric
+		metricName, sel, err := annotations.ParseInstantVectorSelector(raw)
+		if err != nil {
+			klog.V(2).InfoS("External Metrics: invalid selector", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName), "resource", resource, "value", raw, "err", err)
+			continue
+		}
+
+		m, err := nsClient.List(metricName, sel)
+		if err != nil {
+			klog.V(2).InfoS("External Metrics: query failed", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName), "resource", resource, "metric", metricName, "err", err)
+			continue
+		}
+		if m == nil || len(m.Items) == 0 {
+			klog.V(4).InfoS("External Metrics: no items", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName), "resource", resource, "metric", metricName)
+			continue
+		}
+		klog.V(4).InfoS("External Metrics: query succeeded", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName), "resource", resource, "metric", metricName, "items", len(m.Items))
+
+		timestamp = m.Items[0].Timestamp
+		if m.Items[0].WindowSeconds != nil {
+			window = metav1.Duration{Duration: time.Duration(*m.Items[0].WindowSeconds) * time.Second}
+		}
+
+		for _, val := range m.Items {
+			podName := val.MetricLabels[s.options.PodNameLabel]
+			ctrName := val.MetricLabels[s.options.ContainerNameLabel]
+			if podName == "" || ctrName == "" {
+				continue
+			}
+			key := ctrKey{pod: podName, container: ctrName}
+			if usage[key] == nil {
+				usage[key] = make(corev1.ResourceList)
+			}
+			usage[key][resource] = val.Value
 		}
 	}
-	return out
+
+	if len(usage) == 0 {
+		return
+	}
+	perPod := make(map[string]*v1beta1.PodMetrics)
+	for key, res := range usage {
+		pm, ok := perPod[key.pod]
+		if !ok {
+			pm = &v1beta1.PodMetrics{
+				ObjectMeta: metav1.ObjectMeta{Namespace: vpa.ID.Namespace, Name: key.pod},
+				Timestamp:  timestamp,
+				Window:     window,
+			}
+			perPod[key.pod] = pm
+		}
+		pm.Containers = append(pm.Containers, v1beta1.ContainerMetrics{Name: key.container, Usage: res})
+	}
+	for _, pm := range perPod {
+		out.Items = append(out.Items, *pm)
+	}
+}
+
+// selectorStringFor returns the raw instant-vector-selector string for the
+// given resource, falling back from VPA annotation to the global flag.
+func (s *externalMetricsClient) selectorStringFor(vpa *model.Vpa, resource corev1.ResourceName) string {
+	if v := annotations.ExternalMetricForResource(vpa.Annotations, resource); v != "" {
+		return v
+	}
+	return s.options.ResourceMetrics[resource]
 }

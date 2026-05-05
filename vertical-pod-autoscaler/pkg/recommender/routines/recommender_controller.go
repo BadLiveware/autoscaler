@@ -136,6 +136,7 @@ func NewRecommenderController(
 		}
 		externalClientOptions := &input_metrics.ExternalClientOptions{
 			ResourceMetrics:    resourceMetrics,
+			PodNameLabel:       config.CtrPodNameLabel,
 			ContainerNameLabel: config.CtrNameLabel,
 		}
 		klog.V(1).InfoS("Using External Metrics", "options", externalClientOptions)
@@ -145,6 +146,7 @@ func NewRecommenderController(
 		// in via per-VPA annotations are served by external metrics.
 		defaultSource := input_metrics.NewPodMetricsesSource(resourceclient.NewForConfigOrDie(kubeConfig))
 		externalClientOptions := &input_metrics.ExternalClientOptions{
+			PodNameLabel:       config.CtrPodNameLabel,
 			ContainerNameLabel: config.CtrNameLabel,
 			AnnotatedVPAsOnly:  true,
 		}

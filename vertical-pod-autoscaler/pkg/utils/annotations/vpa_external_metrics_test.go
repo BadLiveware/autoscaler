@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
 )
 
 func TestExternalMetricForResource(t *testing.T) {
@@ -115,6 +116,73 @@ func TestHasHistoryQuery(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := HasHistoryQuery(tc.annotations); got != tc.want {
 				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseInstantVectorSelector(t *testing.T) {
+	cases := []struct {
+		name        string
+		input       string
+		wantMetric  string
+		wantMatches map[string]string // labels and the matching value
+		wantNoMatch map[string]string // labels and a value that should NOT match
+		wantErr     bool
+	}{
+		{name: "empty", input: "", wantErr: true},
+		{name: "bare metric", input: "dotnet_gc_total_bytes", wantMetric: "dotnet_gc_total_bytes"},
+		{name: "whitespace", input: "  metric  ", wantMetric: "metric"},
+		{
+			name:        "single equality matcher",
+			input:       `metric{deployment="api"}`,
+			wantMetric:  "metric",
+			wantMatches: map[string]string{"deployment": "api"},
+			wantNoMatch: map[string]string{"deployment": "other"},
+		},
+		{
+			name:        "multiple matchers",
+			input:       `metric{deployment="api",env="prod"}`,
+			wantMetric:  "metric",
+			wantMatches: map[string]string{"deployment": "api", "env": "prod"},
+			wantNoMatch: map[string]string{"deployment": "api", "env": "qa"},
+		},
+		{
+			name:        "inequality matcher",
+			input:       `metric{tier!="frontend"}`,
+			wantMetric:  "metric",
+			wantMatches: map[string]string{"tier": "backend"},
+			wantNoMatch: map[string]string{"tier": "frontend"},
+		},
+		{name: "regex match rejected", input: `metric{deployment=~"api.*"}`, wantErr: true},
+		{name: "regex non-match rejected", input: `metric{deployment!~"api.*"}`, wantErr: true},
+		{name: "missing closing brace", input: `metric{deployment="api"`, wantErr: true},
+		{name: "empty metric name", input: `{deployment="api"}`, wantErr: true},
+		{name: "empty matcher block", input: `metric{}`, wantMetric: "metric"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotMetric, sel, err := ParseInstantVectorSelector(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("want error, got nil; metric=%q sel=%v", gotMetric, sel)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if gotMetric != tc.wantMetric {
+				t.Errorf("metric: got %q, want %q", gotMetric, tc.wantMetric)
+			}
+			if sel == nil {
+				t.Fatal("selector is nil")
+			}
+			if tc.wantMatches != nil && !sel.Matches(labels.Set(tc.wantMatches)) {
+				t.Errorf("selector %q should match %v", sel.String(), tc.wantMatches)
+			}
+			if tc.wantNoMatch != nil && sel.Matches(labels.Set(tc.wantNoMatch)) {
+				t.Errorf("selector %q should NOT match %v", sel.String(), tc.wantNoMatch)
 			}
 		})
 	}

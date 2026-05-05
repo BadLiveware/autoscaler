@@ -55,15 +55,11 @@ func (f *fakeAPI) Query(_ context.Context, _ string, _ time.Time, _ ...prometheu
 // fakeClusterState implements just the slice of ClusterState the observer
 // reads.
 type fakeClusterState struct {
-	vpas         map[model.VpaID]*model.Vpa
-	matchingPods map[model.VpaID][]model.PodID
-	pods         map[model.PodID]*model.PodState
+	vpas map[model.VpaID]*model.Vpa
+	pods map[model.PodID]*model.PodState
 }
 
-func (f *fakeClusterState) VPAs() map[model.VpaID]*model.Vpa { return f.vpas }
-func (f *fakeClusterState) GetMatchingPods(vpa *model.Vpa) []model.PodID {
-	return f.matchingPods[vpa.ID]
-}
+func (f *fakeClusterState) VPAs() map[model.VpaID]*model.Vpa     { return f.vpas }
 func (f *fakeClusterState) Pods() map[model.PodID]*model.PodState { return f.pods }
 
 func vpaWithOOMAnnotation(ns, name, metric string) *model.Vpa {
@@ -115,9 +111,8 @@ func TestPrometheusObserver_FirstPollDiscarded(t *testing.T) {
 	pod := podWithMemRequest("ns", "pod-a", "ctr", 256<<20)
 
 	cs := &fakeClusterState{
-		vpas:         map[model.VpaID]*model.Vpa{vpa.ID: vpa},
-		matchingPods: map[model.VpaID][]model.PodID{vpa.ID: {pod.ID}},
-		pods:         map[model.PodID]*model.PodState{pod.ID: pod},
+		vpas: map[model.VpaID]*model.Vpa{vpa.ID: vpa},
+		pods: map[model.PodID]*model.PodState{pod.ID: pod},
 	}
 	api := &fakeAPI{
 		// Every query returns the same vector with one event. The first
@@ -148,9 +143,8 @@ func TestPrometheusObserver_FractionalIncreaseFloored(t *testing.T) {
 	vpa := vpaWithOOMAnnotation("ns", "vpa1", "m")
 	pod := podWithMemRequest("ns", "pod-a", "ctr", 1<<20)
 	cs := &fakeClusterState{
-		vpas:         map[model.VpaID]*model.Vpa{vpa.ID: vpa},
-		matchingPods: map[model.VpaID][]model.PodID{vpa.ID: {pod.ID}},
-		pods:         map[model.PodID]*model.PodState{pod.ID: pod},
+		vpas: map[model.VpaID]*model.Vpa{vpa.ID: vpa},
+		pods: map[model.PodID]*model.PodState{pod.ID: pod},
 	}
 	api := &fakeAPI{results: []prommodel.Value{prommodel.Vector{
 		sample("pod-a", "ctr", 2.7, time.Now()),
@@ -167,9 +161,8 @@ func TestPrometheusObserver_SkipsZeroOrNegativeIncrease(t *testing.T) {
 	vpa := vpaWithOOMAnnotation("ns", "vpa1", "m")
 	pod := podWithMemRequest("ns", "pod-a", "ctr", 1<<20)
 	cs := &fakeClusterState{
-		vpas:         map[model.VpaID]*model.Vpa{vpa.ID: vpa},
-		matchingPods: map[model.VpaID][]model.PodID{vpa.ID: {pod.ID}},
-		pods:         map[model.PodID]*model.PodState{pod.ID: pod},
+		vpas: map[model.VpaID]*model.Vpa{vpa.ID: vpa},
+		pods: map[model.PodID]*model.PodState{pod.ID: pod},
 	}
 	api := &fakeAPI{results: []prommodel.Value{prommodel.Vector{
 		sample("pod-a", "ctr", 0, time.Now()),
@@ -197,9 +190,8 @@ func TestPrometheusObserver_QueryErrorDoesNotMarkSeen(t *testing.T) {
 	vpa := vpaWithOOMAnnotation("ns", "vpa1", "m")
 	pod := podWithMemRequest("ns", "pod-a", "ctr", 1<<20)
 	cs := &fakeClusterState{
-		vpas:         map[model.VpaID]*model.Vpa{vpa.ID: vpa},
-		matchingPods: map[model.VpaID][]model.PodID{vpa.ID: {pod.ID}},
-		pods:         map[model.PodID]*model.PodState{pod.ID: pod},
+		vpas: map[model.VpaID]*model.Vpa{vpa.ID: vpa},
+		pods: map[model.PodID]*model.PodState{pod.ID: pod},
 	}
 	failing := &fakeAPI{err: errors.New("prometheus down")}
 	ch := make(chan OomInfo, 4)
@@ -222,16 +214,18 @@ func TestPrometheusObserver_QueryErrorDoesNotMarkSeen(t *testing.T) {
 	assert.Len(t, ch, 1)
 }
 
-func TestPrometheusObserver_FiltersNonMatchingPods(t *testing.T) {
+func TestPrometheusObserver_DoesNotFilterByVPASelector(t *testing.T) {
+	// The user's annotation selector is the source of scoping; the observer
+	// MUST NOT additionally filter results by VPA pod selector. If the user's
+	// matchers leak across workloads, that's their responsibility.
 	vpa := vpaWithOOMAnnotation("ns", "vpa1", "m")
-	matching := podWithMemRequest("ns", "pod-a", "ctr", 1<<20)
-	other := podWithMemRequest("ns", "pod-other", "ctr", 1<<20)
+	known := podWithMemRequest("ns", "pod-a", "ctr", 1<<20)
+	alsoKnown := podWithMemRequest("ns", "pod-other", "ctr", 1<<20)
 	cs := &fakeClusterState{
-		vpas:         map[model.VpaID]*model.Vpa{vpa.ID: vpa},
-		matchingPods: map[model.VpaID][]model.PodID{vpa.ID: {matching.ID}},
+		vpas: map[model.VpaID]*model.Vpa{vpa.ID: vpa},
 		pods: map[model.PodID]*model.PodState{
-			matching.ID: matching,
-			other.ID:    other,
+			known.ID:     known,
+			alsoKnown.ID: alsoKnown,
 		},
 	}
 	api := &fakeAPI{results: []prommodel.Value{prommodel.Vector{
@@ -243,7 +237,29 @@ func TestPrometheusObserver_FiltersNonMatchingPods(t *testing.T) {
 
 	o.pollOnce(context.Background())
 	o.pollOnce(context.Background())
-	assert.Len(t, ch, 1, "only the VPA's matching pod should yield events")
+	assert.Len(t, ch, 6, "events from every pod returned by the user's selector should be emitted")
+}
+
+func TestPrometheusObserver_SkipsUnknownPods(t *testing.T) {
+	// Pods present in Prometheus results but not in clusterState (e.g.
+	// already deleted, or in a different namespace the observer doesn't
+	// track) get dropped because we can't resolve their memory request.
+	vpa := vpaWithOOMAnnotation("ns", "vpa1", "m")
+	known := podWithMemRequest("ns", "pod-a", "ctr", 1<<20)
+	cs := &fakeClusterState{
+		vpas: map[model.VpaID]*model.Vpa{vpa.ID: vpa},
+		pods: map[model.PodID]*model.PodState{known.ID: known},
+	}
+	api := &fakeAPI{results: []prommodel.Value{prommodel.Vector{
+		sample("pod-a", "ctr", 1, time.Now()),
+		sample("pod-ghost", "ctr", 5, time.Now()),
+	}}}
+	ch := make(chan OomInfo, 8)
+	o := newTestObserver(api, cs, ch)
+
+	o.pollOnce(context.Background())
+	o.pollOnce(context.Background())
+	assert.Len(t, ch, 1, "only the known pod should yield events")
 	got := <-ch
 	assert.Equal(t, "pod-a", got.ContainerID.PodName)
 }
@@ -257,9 +273,8 @@ func TestPrometheusObserver_SkipsContainerWithNoMemRequest(t *testing.T) {
 		},
 	}
 	cs := &fakeClusterState{
-		vpas:         map[model.VpaID]*model.Vpa{vpa.ID: vpa},
-		matchingPods: map[model.VpaID][]model.PodID{vpa.ID: {pod.ID}},
-		pods:         map[model.PodID]*model.PodState{pod.ID: pod},
+		vpas: map[model.VpaID]*model.Vpa{vpa.ID: vpa},
+		pods: map[model.PodID]*model.PodState{pod.ID: pod},
 	}
 	api := &fakeAPI{results: []prommodel.Value{prommodel.Vector{
 		sample("pod-a", "ctr", 1, time.Now()),

@@ -17,7 +17,11 @@ limitations under the License.
 package annotations
 
 import (
+	"fmt"
+	"strings"
+
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
 )
 
 const (
@@ -107,4 +111,57 @@ func HasHistoryQuery(annotations map[string]string) bool {
 	}
 	return annotations[HistoryQueryCPUAnnotation] != "" ||
 		annotations[HistoryQueryMemoryAnnotation] != ""
+}
+
+// ParseInstantVectorSelector parses a Prometheus-style instant vector
+// selector — `metric_name{label="value",label!="value",...}` — into a metric
+// name and a Kubernetes labels.Selector. A bare metric name (no `{...}`)
+// yields labels.Everything().
+//
+// The Kubernetes External Metrics API takes (metric_name, labels.Selector)
+// rather than raw PromQL, so this conversion is the bridge. PromQL regex
+// match operators (=~, !~) are rejected because labels.Selector cannot
+// express them.
+func ParseInstantVectorSelector(s string) (metricName string, selector labels.Selector, err error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", nil, fmt.Errorf("empty selector")
+	}
+	open := strings.IndexByte(s, '{')
+	if open < 0 {
+		return s, labels.Everything(), nil
+	}
+	if !strings.HasSuffix(s, "}") {
+		return "", nil, fmt.Errorf("malformed selector %q: missing closing brace", s)
+	}
+	metricName = strings.TrimSpace(s[:open])
+	if metricName == "" {
+		return "", nil, fmt.Errorf("malformed selector %q: empty metric name", s)
+	}
+	matchers := s[open+1 : len(s)-1]
+	if strings.Contains(matchers, "=~") || strings.Contains(matchers, "!~") {
+		return "", nil, fmt.Errorf("regex matchers (=~, !~) not supported; use exact = / != matches")
+	}
+	// PromQL quotes label values; labels.Selector does not. Strip the quotes.
+	matchers = stripQuotes(matchers)
+	if strings.TrimSpace(matchers) == "" {
+		return metricName, labels.Everything(), nil
+	}
+	selector, err = labels.Parse(matchers)
+	if err != nil {
+		return "", nil, fmt.Errorf("parse matchers from %q: %w", s, err)
+	}
+	return metricName, selector, nil
+}
+
+func stripQuotes(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if r == '"' {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
