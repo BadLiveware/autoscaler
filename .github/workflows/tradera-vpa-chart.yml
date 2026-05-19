@@ -5,8 +5,13 @@ on:
     branches: ["tradera/**", "feat/**"]
     tags: ["vpa-tradera-v*"]
     paths:
-      - "vertical-pod-autoscaler/charts/vertical-pod-autoscaler/**"
+      # Mirror tradera-vpa-images.yml's paths so the two workflows co-fire
+      # on the same commits. The chart's appVersion is a 7-char sha that
+      # must resolve to an image tag the images workflow published for
+      # the same commit; firing them together keeps that mapping intact.
+      - "vertical-pod-autoscaler/**"
       - ".github/workflows/tradera-vpa-chart.yml"
+      - ".github/workflows/tradera-vpa-images.yml"
   workflow_dispatch:
     inputs:
       version:

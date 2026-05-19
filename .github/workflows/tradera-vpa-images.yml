@@ -7,6 +7,7 @@ on:
     paths:
       - "vertical-pod-autoscaler/**"
       - ".github/workflows/tradera-vpa-images.yml"
+      - ".github/workflows/tradera-vpa-chart.yml"
   workflow_dispatch:
     inputs:
       tag:
