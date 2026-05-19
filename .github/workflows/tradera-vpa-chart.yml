@@ -33,31 +33,30 @@ jobs:
           case "${{ github.event_name }}" in
             workflow_dispatch)
               VERSION="${{ inputs.version }}"
+              APPVERSION="vpa-tradera-v$VERSION"
               ;;
             pull_request)
-              # PR builds validate the chart but don't publish. Synthesize a
-              # version so `helm package` produces a deterministic artifact
-              # name without colliding with real releases.
-              VERSION="0.0.0-pr.${{ github.event.pull_request.number }}.${GITHUB_SHA::7}"
+              # PR builds produce a pre-release chart pinned to the image
+              # built for the PR head commit (the Tradera VPA images
+              # workflow tags those with the 7-char short sha).
+              HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+              VERSION="0.0.0-pr.${{ github.event.pull_request.number }}.${HEAD_SHA:0:7}"
+              APPVERSION="${HEAD_SHA:0:7}"
               ;;
             *)
               # tag refs/tags/vpa-tradera-v0.9.0  →  0.9.0
               VERSION="${GITHUB_REF_NAME#vpa-tradera-v}"
+              # Tag image is published with the full git tag; pin appVersion
+              # to that so `helm install` resolves images without an explicit
+              # image.tag override.
+              APPVERSION="vpa-tradera-v$VERSION"
               ;;
           esac
           if [ -z "$VERSION" ]; then
             echo "version is empty" >&2; exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          # The image tag the workflow Tradera VPA images publishes is the
-          # full git tag (e.g. vpa-tradera-v0.9.0). Pin appVersion to that
-          # so `helm install` of this chart pulls the matching images
-          # without an explicit image.tag override.
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "appVersion=$VERSION" >> "$GITHUB_OUTPUT"
-          else
-            echo "appVersion=vpa-tradera-v$VERSION" >> "$GITHUB_OUTPUT"
-          fi
+          echo "appVersion=$APPVERSION" >> "$GITHUB_OUTPUT"
 
       - name: Lint
         run: helm lint vertical-pod-autoscaler/charts/vertical-pod-autoscaler
@@ -69,26 +68,15 @@ jobs:
             --app-version "${{ steps.ver.outputs.appVersion }}" \
             --destination .
 
-      - name: Upload chart artifact
-        if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4
-        with:
-          name: vertical-pod-autoscaler-${{ steps.ver.outputs.version }}
-          path: vertical-pod-autoscaler-${{ steps.ver.outputs.version }}.tgz
-          if-no-files-found: error
-
       - name: Login to GHCR
-        if: github.event_name != 'pull_request'
         run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Push
-        if: github.event_name != 'pull_request'
         run: |
           helm push "vertical-pod-autoscaler-${{ steps.ver.outputs.version }}.tgz" \
             "oci://ghcr.io/${{ github.repository }}/charts"
 
       - name: Summary
-        if: github.event_name != 'pull_request'
         run: |
           {
             echo "### Chart published"
