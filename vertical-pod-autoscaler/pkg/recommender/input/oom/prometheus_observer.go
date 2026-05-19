@@ -29,6 +29,7 @@ import (
 
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/model"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/utils/annotations"
+	metrics_recommender "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/utils/metrics/recommender"
 )
 
 // promQueryAPI is the slice of the Prometheus v1 API that this observer
@@ -159,13 +160,15 @@ func (o *PrometheusObserver) pollOnce(ctx context.Context) {
 }
 
 // pruneVPAs drops per-pod state for VPAs that no longer exist. Without this
-// the map grows unboundedly on VPA churn.
+// the map grows unboundedly on VPA churn. Also drops the corresponding
+// metric label series so the per-VPA observability surface stays in sync.
 func (o *PrometheusObserver) pruneVPAs(current map[model.VpaID]*model.Vpa) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	for id := range o.values {
 		if _, ok := current[id]; !ok {
 			delete(o.values, id)
+			metrics_recommender.DeletePrometheusObserverSeries(id.Namespace, id.VpaName)
 		}
 	}
 }
@@ -192,6 +195,7 @@ func (o *PrometheusObserver) pollVPA(ctx context.Context, vpa *model.Vpa, select
 		// State is preserved on query failure: the next successful poll
 		// computes against the last-known value, so transient Prometheus
 		// gaps don't lose events.
+		metrics_recommender.RecordPrometheusObserverPoll(vpa.ID.Namespace, vpa.ID.VpaName, metrics_recommender.PollError)
 		klog.V(2).InfoS("Prometheus OOM query failed", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName), "err", err)
 		return
 	}
@@ -201,9 +205,11 @@ func (o *PrometheusObserver) pollVPA(ctx context.Context, vpa *model.Vpa, select
 
 	samples, ok := val.(prommodel.Vector)
 	if !ok {
+		metrics_recommender.RecordPrometheusObserverPoll(vpa.ID.Namespace, vpa.ID.VpaName, metrics_recommender.PollUnexpectedType)
 		klog.V(2).InfoS("Prometheus OOM query returned unexpected type", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName), "type", fmt.Sprintf("%T", val))
 		return
 	}
+	metrics_recommender.RecordPrometheusObserverPoll(vpa.ID.Namespace, vpa.ID.VpaName, metrics_recommender.PollOK)
 
 	pods := o.clusterState.Pods()
 
@@ -215,6 +221,7 @@ func (o *PrometheusObserver) pollVPA(ctx context.Context, vpa *model.Vpa, select
 	}
 	o.mu.Unlock()
 
+	totalEmitted := 0
 	for _, sample := range samples {
 		podName := string(sample.Metric[prommodel.LabelName(o.podLabel)])
 		ctrName := string(sample.Metric[prommodel.LabelName(o.containerLabel)])
@@ -245,6 +252,7 @@ func (o *PrometheusObserver) pollVPA(ctx context.Context, vpa *model.Vpa, select
 			// since the reset; emit those. Mild under-count beats the
 			// alternative of emitting `previous + current` and double-
 			// counting the reset boundary.
+			metrics_recommender.IncPrometheusObserverReset(vpa.ID.Namespace, vpa.ID.VpaName)
 			klog.V(2).InfoS("Prometheus OOM observer: counter reset detected", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName), "pod", podName, "container", ctrName, "from", previous, "to", current)
 			delta = current
 		}
@@ -283,8 +291,12 @@ func (o *PrometheusObserver) pollVPA(ctx context.Context, vpa *model.Vpa, select
 				},
 			}
 		}
+		totalEmitted += int(count)
 		klog.V(2).InfoS("Prometheus OOM observer: emitted events", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName), "pod", podName, "container", ctrName, "count", count)
 	}
+	// Always record (even zero) to keep the counter and gauge series
+	// present so dashboards can show "observer up, no events".
+	metrics_recommender.AddPrometheusObserverEvents(vpa.ID.Namespace, vpa.ID.VpaName, totalEmitted)
 
 	// Drop per-pod state for pods that no longer exist in ClusterState.
 	// We intentionally do NOT drop state for pods that are merely absent
@@ -298,5 +310,7 @@ func (o *PrometheusObserver) pollVPA(ctx context.Context, vpa *model.Vpa, select
 			delete(vpaState, key)
 		}
 	}
+	tracked := len(vpaState)
 	o.mu.Unlock()
+	metrics_recommender.SetPrometheusObserverTrackedPods(vpa.ID.Namespace, vpa.ID.VpaName, tracked)
 }
