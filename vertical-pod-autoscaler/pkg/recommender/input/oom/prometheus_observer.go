@@ -46,6 +46,12 @@ type clusterStateView interface {
 	Pods() map[model.PodID]*model.PodState
 }
 
+// podCtrKey is the per-(pod, container) key for tracked counter values.
+type podCtrKey struct {
+	pod       string
+	container string
+}
+
 // PrometheusObserver polls a per-VPA Prometheus counter and emits OomInfo
 // records into a shared channel for each observed counter increase.
 //
@@ -55,6 +61,15 @@ type clusterStateView interface {
 // recommender blind to memory pressure. By exposing a counter that the
 // runtime increments on each OOM event, those events can drive VPA's
 // existing OOM bump-up logic.
+//
+// The observer queries the counter's absolute value on each poll and
+// tracks the last-seen value per (pod, container) in process. Deltas are
+// computed in-process, NOT via PromQL increase(). Rationale: increase()
+// extrapolates across a [range] window, which silently returns nothing
+// when samples don't land at both window boundaries (a common pattern
+// with OTLP-pushed counters where exporter intervals don't align with
+// the observer's poll interval). Each OOM event drives a VPA bump-up,
+// so dropped events translate directly to under-sized recommendations.
 //
 // The observer does NOT implement the Observer interface intentionally:
 // Observer is a Kubernetes event/informer pattern, while this is a
@@ -68,12 +83,12 @@ type PrometheusObserver struct {
 	podLabel       string
 	containerLabel string
 
-	// VPAs that have completed at least one successful poll. The first
-	// successful poll's increase() result is discarded so a recommender
-	// restart does not replay historical counter increments as a synthetic
-	// OOM burst.
-	mu   sync.Mutex
-	seen map[model.VpaID]struct{}
+	// values holds the most recent counter value observed for each
+	// (VPA, pod, container). The first observation of a pod establishes
+	// a baseline (no events emitted); subsequent observations emit
+	// floor(current - previous) events.
+	mu     sync.Mutex
+	values map[model.VpaID]map[podCtrKey]float64
 }
 
 // PrometheusObserverConfig is the configuration for PrometheusObserver.
@@ -88,10 +103,10 @@ type PrometheusObserverConfig struct {
 	// OomChan receives synthetic OomInfo records, typically the same channel
 	// the existing event-driven Observer writes to.
 	OomChan chan<- OomInfo
-	// PollInterval is both how often we query Prometheus and the [range]
-	// window passed to increase(). Match it to the recommender's
-	// MetricsFetcherInterval so each event is observed exactly once under
-	// nominal conditions. Brief Prometheus outages may cause missed events.
+	// PollInterval is how often we query Prometheus. Each poll computes the
+	// delta against the previous poll's observed counter value, so the
+	// interval controls reaction latency only — it does not affect event
+	// count fidelity.
 	PollInterval time.Duration
 	// QueryTimeout bounds each poll's PromQL execution.
 	QueryTimeout time.Duration
@@ -112,7 +127,7 @@ func NewPrometheusObserver(cfg PrometheusObserverConfig) *PrometheusObserver {
 		queryTimeout:   cfg.QueryTimeout,
 		podLabel:       cfg.PodLabel,
 		containerLabel: cfg.ContainerLabel,
-		seen:           make(map[model.VpaID]struct{}),
+		values:         make(map[model.VpaID]map[podCtrKey]float64),
 	}
 }
 
@@ -140,54 +155,48 @@ func (o *PrometheusObserver) pollOnce(ctx context.Context) {
 		}
 		o.pollVPA(ctx, vpa, selector)
 	}
-	o.pruneSeen(vpas)
+	o.pruneVPAs(vpas)
 }
 
-// pruneSeen drops first-poll-baseline entries for VPAs that no longer exist.
-// Without this the seen map grows unboundedly on VPA churn.
-func (o *PrometheusObserver) pruneSeen(current map[model.VpaID]*model.Vpa) {
+// pruneVPAs drops per-pod state for VPAs that no longer exist. Without this
+// the map grows unboundedly on VPA churn.
+func (o *PrometheusObserver) pruneVPAs(current map[model.VpaID]*model.Vpa) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	for id := range o.seen {
+	for id := range o.values {
 		if _, ok := current[id]; !ok {
-			delete(o.seen, id)
+			delete(o.values, id)
 		}
 	}
 }
 
 // pollVPA queries Prometheus for the counter selector annotated on this VPA.
 // The selector is the user's instant vector selector (e.g.
-// `dotnet_oome{deployment="api"}`); we only wrap it with sum-by + increase().
-// We do NOT additionally filter by VPA pod selector — the user's matchers
-// own scoping.
+// `dotnet_oome{deployment="api"}`); we only wrap it with sum-by. We do NOT
+// additionally filter by VPA pod selector — the user's matchers own scoping.
 func (o *PrometheusObserver) pollVPA(ctx context.Context, vpa *model.Vpa, selector string) {
 	queryCtx, cancel := context.WithTimeout(ctx, o.queryTimeout)
 	defer cancel()
 
-	// sum-by guards against multiple series for the same (pod, container)
-	// when the counter exposes orthogonal labels (e.g. exception type).
+	// sum-by collapses orthogonal labels (e.g. exception type) into one
+	// value per (pod, container). The bare selector returns the most recent
+	// sample in Prometheus's lookback window, which is exactly what
+	// in-process delta tracking wants.
 	query := fmt.Sprintf(
-		"sum by (%s, %s) (increase(%s[%s]))",
-		o.podLabel, o.containerLabel, selector, prommodel.Duration(o.pollInterval).String(),
+		"sum by (%s, %s) (%s)",
+		o.podLabel, o.containerLabel, selector,
 	)
 
 	val, warns, err := o.promAPI.Query(queryCtx, query, time.Now())
 	if err != nil {
+		// State is preserved on query failure: the next successful poll
+		// computes against the last-known value, so transient Prometheus
+		// gaps don't lose events.
 		klog.V(2).InfoS("Prometheus OOM query failed", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName), "err", err)
 		return
 	}
 	for _, w := range warns {
 		klog.V(4).InfoS("Prometheus OOM query warning", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName), "warning", w)
-	}
-
-	o.mu.Lock()
-	_, alreadySeen := o.seen[vpa.ID]
-	o.seen[vpa.ID] = struct{}{}
-	o.mu.Unlock()
-
-	if !alreadySeen {
-		klog.V(4).InfoS("Prometheus OOM observer: discarding first-poll delta", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName))
-		return
 	}
 
 	samples, ok := val.(prommodel.Vector)
@@ -198,15 +207,52 @@ func (o *PrometheusObserver) pollVPA(ctx context.Context, vpa *model.Vpa, select
 
 	pods := o.clusterState.Pods()
 
+	o.mu.Lock()
+	vpaState, ok := o.values[vpa.ID]
+	if !ok {
+		vpaState = make(map[podCtrKey]float64)
+		o.values[vpa.ID] = vpaState
+	}
+	o.mu.Unlock()
+
 	for _, sample := range samples {
 		podName := string(sample.Metric[prommodel.LabelName(o.podLabel)])
 		ctrName := string(sample.Metric[prommodel.LabelName(o.containerLabel)])
 		if podName == "" || ctrName == "" {
 			continue
 		}
-		// floor: increase() can return small fractional values across rate
-		// boundaries, but each emitted OomInfo represents a discrete event.
-		count := int64(math.Floor(float64(sample.Value)))
+		current := float64(sample.Value)
+		if math.IsNaN(current) || math.IsInf(current, 0) {
+			continue
+		}
+
+		key := podCtrKey{pod: podName, container: ctrName}
+
+		o.mu.Lock()
+		previous, hadPrevious := vpaState[key]
+		vpaState[key] = current
+		o.mu.Unlock()
+
+		if !hadPrevious {
+			klog.V(4).InfoS("Prometheus OOM observer: storing baseline", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName), "pod", podName, "container", ctrName, "value", current)
+			continue
+		}
+
+		delta := current - previous
+		if delta < 0 {
+			// Counter reset (pod scrape restarted, or the metric source
+			// itself reset). The new absolute value is the count of events
+			// since the reset; emit those. Mild under-count beats the
+			// alternative of emitting `previous + current` and double-
+			// counting the reset boundary.
+			klog.V(2).InfoS("Prometheus OOM observer: counter reset detected", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName), "pod", podName, "container", ctrName, "from", previous, "to", current)
+			delta = current
+		}
+
+		// Floor: fractional values can appear when the counter is exposed
+		// as a float (sum-by, or a rate-derived counter). Each emitted
+		// OomInfo represents one discrete event.
+		count := int64(math.Floor(delta))
 		if count <= 0 {
 			continue
 		}
@@ -239,4 +285,18 @@ func (o *PrometheusObserver) pollVPA(ctx context.Context, vpa *model.Vpa, select
 		}
 		klog.V(2).InfoS("Prometheus OOM observer: emitted events", "vpa", klog.KRef(vpa.ID.Namespace, vpa.ID.VpaName), "pod", podName, "container", ctrName, "count", count)
 	}
+
+	// Drop per-pod state for pods that no longer exist in ClusterState.
+	// We intentionally do NOT drop state for pods that are merely absent
+	// from this query result: that absence is just as likely to be a
+	// transient Prometheus gap, and dropping would reset the baseline and
+	// silently lose events on the next successful query.
+	o.mu.Lock()
+	for key := range vpaState {
+		podID := model.PodID{Namespace: vpa.ID.Namespace, PodName: key.pod}
+		if _, ok := pods[podID]; !ok {
+			delete(vpaState, key)
+		}
+	}
+	o.mu.Unlock()
 }

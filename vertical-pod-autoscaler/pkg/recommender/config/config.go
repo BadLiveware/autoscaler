@@ -243,7 +243,7 @@ func InitRecommenderFlags() *RecommenderConfig {
 	flag.StringVar(&config.ExternalMemoryMetric, "external-metrics-memory-metric", config.ExternalMemoryMetric, "ALPHA.  Metric to use with external metrics provider for memory usage.")
 
 	// Per-VPA Prometheus OOM observer flags
-	flag.DurationVar(&config.PrometheusOOMObserverInterval, "prometheus-oom-observer-interval", config.PrometheusOOMObserverInterval, `How often the Prometheus OOM observer polls counters annotated on VPAs (external.vpa.k8s.io/oom-counter-metric). Doubles as the [range] window passed to increase(); should be >= the Prometheus scrape interval to avoid spurious zero results. Default 15s; tune up if your Prometheus scrapes less often.`)
+	flag.DurationVar(&config.PrometheusOOMObserverInterval, "prometheus-oom-observer-interval", config.PrometheusOOMObserverInterval, `How often the Prometheus OOM observer polls counters annotated on VPAs (external.vpa.k8s.io/oom-counter-metric). Deltas are computed in-process against the previous poll's absolute counter value, so this flag controls reaction latency only — not event-count fidelity. Default 15s.`)
 
 	// Aggregation configuration flags
 	flag.DurationVar(&config.MemoryAggregationInterval, "memory-aggregation-interval", config.MemoryAggregationInterval, `The length of a single interval, for which the peak memory usage is computed. Memory usage peaks are aggregated in multiples of this interval. In other words there is one memory usage sample per interval (the maximum usage over that interval)`)

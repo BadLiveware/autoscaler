@@ -102,11 +102,14 @@ func newTestObserver(api promQueryAPI, cs clusterStateView, ch chan<- OomInfo) *
 		queryTimeout:   5 * time.Second,
 		podLabel:       "pod",
 		containerLabel: "container",
-		seen:           make(map[model.VpaID]struct{}),
+		values:         make(map[model.VpaID]map[podCtrKey]float64),
 	}
 }
 
-func TestPrometheusObserver_FirstPollDiscarded(t *testing.T) {
+func TestPrometheusObserver_FirstPollEstablishesBaseline(t *testing.T) {
+	// The first observation of a (pod, container) is the baseline. No
+	// events are emitted; the value is recorded so subsequent polls can
+	// compute deltas.
 	vpa := vpaWithOOMAnnotation("ns", "vpa1", "dotnet_oome")
 	pod := podWithMemRequest("ns", "pod-a", "ctr", 256<<20)
 
@@ -115,10 +118,9 @@ func TestPrometheusObserver_FirstPollDiscarded(t *testing.T) {
 		pods: map[model.PodID]*model.PodState{pod.ID: pod},
 	}
 	api := &fakeAPI{
-		// Every query returns the same vector with one event. The first
-		// call should be discarded; the second should produce an OomInfo.
 		results: []prommodel.Value{
-			prommodel.Vector{sample("pod-a", "ctr", 1, time.Now())},
+			prommodel.Vector{sample("pod-a", "ctr", 5, time.Now())},
+			prommodel.Vector{sample("pod-a", "ctr", 8, time.Now())},
 		},
 	}
 	ch := make(chan OomInfo, 4)
@@ -126,11 +128,11 @@ func TestPrometheusObserver_FirstPollDiscarded(t *testing.T) {
 
 	o.pollOnce(context.Background())
 	assert.Equal(t, 1, api.calls)
-	assert.Empty(t, ch, "first poll's events must be discarded")
+	assert.Empty(t, ch, "first poll establishes the baseline; no events emitted")
 
 	o.pollOnce(context.Background())
 	assert.Equal(t, 2, api.calls)
-	assert.Len(t, ch, 1, "second poll should emit one OomInfo")
+	assert.Len(t, ch, 3, "second poll should emit delta = 8 - 5 = 3 events")
 
 	got := <-ch
 	assert.Equal(t, "ns", got.ContainerID.Namespace)
@@ -139,40 +141,168 @@ func TestPrometheusObserver_FirstPollDiscarded(t *testing.T) {
 	assert.Equal(t, model.ResourceAmount(256<<20), got.Memory)
 }
 
-func TestPrometheusObserver_FractionalIncreaseFloored(t *testing.T) {
+func TestPrometheusObserver_FractionalDeltaFloored(t *testing.T) {
 	vpa := vpaWithOOMAnnotation("ns", "vpa1", "m")
 	pod := podWithMemRequest("ns", "pod-a", "ctr", 1<<20)
 	cs := &fakeClusterState{
 		vpas: map[model.VpaID]*model.Vpa{vpa.ID: vpa},
 		pods: map[model.PodID]*model.PodState{pod.ID: pod},
 	}
-	api := &fakeAPI{results: []prommodel.Value{prommodel.Vector{
-		sample("pod-a", "ctr", 2.7, time.Now()),
-	}}}
+	api := &fakeAPI{results: []prommodel.Value{
+		prommodel.Vector{sample("pod-a", "ctr", 0, time.Now())},
+		prommodel.Vector{sample("pod-a", "ctr", 2.7, time.Now())},
+	}}
 	ch := make(chan OomInfo, 8)
 	o := newTestObserver(api, cs, ch)
 
-	o.pollOnce(context.Background()) // first poll discarded
 	o.pollOnce(context.Background())
-	assert.Len(t, ch, 2, "increase 2.7 should floor to 2 events")
+	o.pollOnce(context.Background())
+	assert.Len(t, ch, 2, "delta 2.7 should floor to 2 events")
 }
 
-func TestPrometheusObserver_SkipsZeroOrNegativeIncrease(t *testing.T) {
+func TestPrometheusObserver_SkipsZeroOrNegativeDelta(t *testing.T) {
+	// Counter unchanged between two polls — no events.
 	vpa := vpaWithOOMAnnotation("ns", "vpa1", "m")
 	pod := podWithMemRequest("ns", "pod-a", "ctr", 1<<20)
 	cs := &fakeClusterState{
 		vpas: map[model.VpaID]*model.Vpa{vpa.ID: vpa},
 		pods: map[model.PodID]*model.PodState{pod.ID: pod},
 	}
-	api := &fakeAPI{results: []prommodel.Value{prommodel.Vector{
-		sample("pod-a", "ctr", 0, time.Now()),
-	}}}
+	api := &fakeAPI{results: []prommodel.Value{
+		prommodel.Vector{sample("pod-a", "ctr", 7, time.Now())},
+		prommodel.Vector{sample("pod-a", "ctr", 7, time.Now())},
+	}}
 	ch := make(chan OomInfo, 8)
 	o := newTestObserver(api, cs, ch)
 
 	o.pollOnce(context.Background())
 	o.pollOnce(context.Background())
-	assert.Empty(t, ch, "zero-increase samples should not produce events")
+	assert.Empty(t, ch, "unchanged counter should not produce events")
+}
+
+func TestPrometheusObserver_CounterResetEmitsAbsoluteValue(t *testing.T) {
+	// Counter went down (pod scrape restart or metric reset). The new
+	// absolute value is the count since reset — emit those, accepting a
+	// small under-count at the reset boundary rather than double-counting.
+	vpa := vpaWithOOMAnnotation("ns", "vpa1", "m")
+	pod := podWithMemRequest("ns", "pod-a", "ctr", 1<<20)
+	cs := &fakeClusterState{
+		vpas: map[model.VpaID]*model.Vpa{vpa.ID: vpa},
+		pods: map[model.PodID]*model.PodState{pod.ID: pod},
+	}
+	api := &fakeAPI{results: []prommodel.Value{
+		prommodel.Vector{sample("pod-a", "ctr", 20, time.Now())},
+		prommodel.Vector{sample("pod-a", "ctr", 3, time.Now())},
+	}}
+	ch := make(chan OomInfo, 32)
+	o := newTestObserver(api, cs, ch)
+
+	o.pollOnce(context.Background())
+	o.pollOnce(context.Background())
+	assert.Len(t, ch, 3, "reset (20 -> 3) should emit the new absolute value as events")
+}
+
+func TestPrometheusObserver_PreservesStateAcrossQueryFailures(t *testing.T) {
+	// State must survive transient Prometheus failures. Two successful
+	// polls bracket a failing one; the delta is computed across the
+	// failure, no events lost.
+	vpa := vpaWithOOMAnnotation("ns", "vpa1", "m")
+	pod := podWithMemRequest("ns", "pod-a", "ctr", 1<<20)
+	cs := &fakeClusterState{
+		vpas: map[model.VpaID]*model.Vpa{vpa.ID: vpa},
+		pods: map[model.PodID]*model.PodState{pod.ID: pod},
+	}
+	api := &fakeAPI{results: []prommodel.Value{
+		prommodel.Vector{sample("pod-a", "ctr", 10, time.Now())},
+	}}
+	ch := make(chan OomInfo, 32)
+	o := newTestObserver(api, cs, ch)
+
+	// Baseline at 10.
+	o.pollOnce(context.Background())
+	assert.Empty(t, ch)
+
+	// Prometheus glitch.
+	api.err = errors.New("prometheus down")
+	o.pollOnce(context.Background())
+	assert.Empty(t, ch)
+
+	// Recovered, counter at 15 — should emit 5 (delta from the pre-glitch
+	// baseline of 10).
+	api.err = nil
+	api.results = []prommodel.Value{prommodel.Vector{sample("pod-a", "ctr", 15, time.Now())}}
+	o.pollOnce(context.Background())
+	assert.Len(t, ch, 5, "delta must be computed against the last successful poll, not reset on glitch")
+}
+
+func TestPrometheusObserver_PreservesStateAcrossEmptyQueryResults(t *testing.T) {
+	// A query that returns an empty vector (no series at all) must not
+	// reset the per-pod baselines. The pod might just be quietly not
+	// generating samples in this window, or Prometheus might be slow to
+	// scrape — either way, dropping state would cause the next non-empty
+	// poll to silently lose events.
+	vpa := vpaWithOOMAnnotation("ns", "vpa1", "m")
+	pod := podWithMemRequest("ns", "pod-a", "ctr", 1<<20)
+	cs := &fakeClusterState{
+		vpas: map[model.VpaID]*model.Vpa{vpa.ID: vpa},
+		pods: map[model.PodID]*model.PodState{pod.ID: pod},
+	}
+	api := &fakeAPI{results: []prommodel.Value{
+		prommodel.Vector{sample("pod-a", "ctr", 4, time.Now())},
+		prommodel.Vector{},
+		prommodel.Vector{sample("pod-a", "ctr", 7, time.Now())},
+	}}
+	ch := make(chan OomInfo, 32)
+	o := newTestObserver(api, cs, ch)
+
+	o.pollOnce(context.Background()) // baseline 4
+	o.pollOnce(context.Background()) // empty result, state preserved
+	o.pollOnce(context.Background()) // 7, delta = 3
+
+	assert.Len(t, ch, 3, "state must survive empty queries; delta = 7 - 4 = 3")
+}
+
+func TestPrometheusObserver_PerPodBaseline(t *testing.T) {
+	// Each pod's first observation is its own baseline. Pods appearing
+	// later don't get retroactive events when they first show up.
+	vpa := vpaWithOOMAnnotation("ns", "vpa1", "m")
+	podA := podWithMemRequest("ns", "pod-a", "ctr", 1<<20)
+	podB := podWithMemRequest("ns", "pod-b", "ctr", 1<<20)
+	cs := &fakeClusterState{
+		vpas: map[model.VpaID]*model.Vpa{vpa.ID: vpa},
+		pods: map[model.PodID]*model.PodState{podA.ID: podA, podB.ID: podB},
+	}
+	now := time.Now()
+	api := &fakeAPI{results: []prommodel.Value{
+		// First poll: only pod-a present.
+		prommodel.Vector{sample("pod-a", "ctr", 5, now)},
+		// Second poll: pod-a grew by 2, pod-b appears for first time.
+		prommodel.Vector{
+			sample("pod-a", "ctr", 7, now),
+			sample("pod-b", "ctr", 11, now),
+		},
+		// Third poll: pod-a grew by 1, pod-b grew by 4.
+		prommodel.Vector{
+			sample("pod-a", "ctr", 8, now),
+			sample("pod-b", "ctr", 15, now),
+		},
+	}}
+	ch := make(chan OomInfo, 32)
+	o := newTestObserver(api, cs, ch)
+
+	o.pollOnce(context.Background())
+	assert.Empty(t, ch, "pod-a first observation = baseline")
+
+	o.pollOnce(context.Background())
+	assert.Len(t, ch, 2, "pod-a delta 5->7 = 2 events; pod-b first observation = baseline")
+
+	// Drain pod-a's events.
+	for range 2 {
+		<-ch
+	}
+
+	o.pollOnce(context.Background())
+	assert.Len(t, ch, 5, "pod-a delta 7->8 = 1; pod-b delta 11->15 = 4")
 }
 
 func TestPrometheusObserver_SkipsUnannotatedVPAs(t *testing.T) {
@@ -184,34 +314,6 @@ func TestPrometheusObserver_SkipsUnannotatedVPAs(t *testing.T) {
 	o := newTestObserver(api, cs, make(chan OomInfo, 1))
 	o.pollOnce(context.Background())
 	assert.Equal(t, 0, api.calls, "no query should be issued for VPA without annotation")
-}
-
-func TestPrometheusObserver_QueryErrorDoesNotMarkSeen(t *testing.T) {
-	vpa := vpaWithOOMAnnotation("ns", "vpa1", "m")
-	pod := podWithMemRequest("ns", "pod-a", "ctr", 1<<20)
-	cs := &fakeClusterState{
-		vpas: map[model.VpaID]*model.Vpa{vpa.ID: vpa},
-		pods: map[model.PodID]*model.PodState{pod.ID: pod},
-	}
-	failing := &fakeAPI{err: errors.New("prometheus down")}
-	ch := make(chan OomInfo, 4)
-	o := newTestObserver(failing, cs, ch)
-
-	o.pollOnce(context.Background())
-	o.pollOnce(context.Background())
-	assert.Empty(t, ch)
-
-	// Recover: the next successful poll must still discard (we never
-	// successfully observed a baseline).
-	failing.err = nil
-	failing.results = []prommodel.Value{prommodel.Vector{sample("pod-a", "ctr", 1, time.Now())}}
-	o.pollOnce(context.Background())
-	assert.Empty(t, ch, "first successful poll after errors is the baseline; events must still be discarded")
-
-	// Subsequent successful poll emits.
-	failing.results = []prommodel.Value{prommodel.Vector{sample("pod-a", "ctr", 1, time.Now())}}
-	o.pollOnce(context.Background())
-	assert.Len(t, ch, 1)
 }
 
 func TestPrometheusObserver_DoesNotFilterByVPASelector(t *testing.T) {
@@ -228,10 +330,17 @@ func TestPrometheusObserver_DoesNotFilterByVPASelector(t *testing.T) {
 			alsoKnown.ID: alsoKnown,
 		},
 	}
-	api := &fakeAPI{results: []prommodel.Value{prommodel.Vector{
-		sample("pod-a", "ctr", 1, time.Now()),
-		sample("pod-other", "ctr", 5, time.Now()),
-	}}}
+	now := time.Now()
+	api := &fakeAPI{results: []prommodel.Value{
+		prommodel.Vector{
+			sample("pod-a", "ctr", 0, now),
+			sample("pod-other", "ctr", 0, now),
+		},
+		prommodel.Vector{
+			sample("pod-a", "ctr", 1, now),
+			sample("pod-other", "ctr", 5, now),
+		},
+	}}
 	ch := make(chan OomInfo, 8)
 	o := newTestObserver(api, cs, ch)
 
@@ -250,10 +359,17 @@ func TestPrometheusObserver_SkipsUnknownPods(t *testing.T) {
 		vpas: map[model.VpaID]*model.Vpa{vpa.ID: vpa},
 		pods: map[model.PodID]*model.PodState{known.ID: known},
 	}
-	api := &fakeAPI{results: []prommodel.Value{prommodel.Vector{
-		sample("pod-a", "ctr", 1, time.Now()),
-		sample("pod-ghost", "ctr", 5, time.Now()),
-	}}}
+	now := time.Now()
+	api := &fakeAPI{results: []prommodel.Value{
+		prommodel.Vector{
+			sample("pod-a", "ctr", 0, now),
+			sample("pod-ghost", "ctr", 0, now),
+		},
+		prommodel.Vector{
+			sample("pod-a", "ctr", 1, now),
+			sample("pod-ghost", "ctr", 5, now),
+		},
+	}}
 	ch := make(chan OomInfo, 8)
 	o := newTestObserver(api, cs, ch)
 
@@ -276,13 +392,60 @@ func TestPrometheusObserver_SkipsContainerWithNoMemRequest(t *testing.T) {
 		vpas: map[model.VpaID]*model.Vpa{vpa.ID: vpa},
 		pods: map[model.PodID]*model.PodState{pod.ID: pod},
 	}
-	api := &fakeAPI{results: []prommodel.Value{prommodel.Vector{
-		sample("pod-a", "ctr", 1, time.Now()),
-	}}}
+	api := &fakeAPI{results: []prommodel.Value{
+		prommodel.Vector{sample("pod-a", "ctr", 0, time.Now())},
+		prommodel.Vector{sample("pod-a", "ctr", 1, time.Now())},
+	}}
 	ch := make(chan OomInfo, 4)
 	o := newTestObserver(api, cs, ch)
 
 	o.pollOnce(context.Background())
 	o.pollOnce(context.Background())
 	assert.Empty(t, ch, "containers without a memory request must be skipped")
+}
+
+func TestPrometheusObserver_PrunesStateForDeletedPods(t *testing.T) {
+	// Pods that disappear from ClusterState must have their per-pod state
+	// pruned, otherwise the map grows unboundedly on pod churn.
+	vpa := vpaWithOOMAnnotation("ns", "vpa1", "m")
+	podA := podWithMemRequest("ns", "pod-a", "ctr", 1<<20)
+	cs := &fakeClusterState{
+		vpas: map[model.VpaID]*model.Vpa{vpa.ID: vpa},
+		pods: map[model.PodID]*model.PodState{podA.ID: podA},
+	}
+	api := &fakeAPI{results: []prommodel.Value{
+		prommodel.Vector{sample("pod-a", "ctr", 5, time.Now())},
+	}}
+	ch := make(chan OomInfo, 4)
+	o := newTestObserver(api, cs, ch)
+
+	o.pollOnce(context.Background())
+	assert.Len(t, o.values[vpa.ID], 1, "pod-a baseline recorded")
+
+	// Pod removed from ClusterState. Empty query result simulates
+	// Prometheus also no longer scraping it.
+	delete(cs.pods, podA.ID)
+	api.results = []prommodel.Value{prommodel.Vector{}}
+	o.pollOnce(context.Background())
+	assert.Empty(t, o.values[vpa.ID], "state for absent pod must be pruned")
+}
+
+func TestPrometheusObserver_PrunesStateForDeletedVPAs(t *testing.T) {
+	vpa := vpaWithOOMAnnotation("ns", "vpa1", "m")
+	pod := podWithMemRequest("ns", "pod-a", "ctr", 1<<20)
+	cs := &fakeClusterState{
+		vpas: map[model.VpaID]*model.Vpa{vpa.ID: vpa},
+		pods: map[model.PodID]*model.PodState{pod.ID: pod},
+	}
+	api := &fakeAPI{results: []prommodel.Value{
+		prommodel.Vector{sample("pod-a", "ctr", 5, time.Now())},
+	}}
+	o := newTestObserver(api, cs, make(chan OomInfo, 4))
+
+	o.pollOnce(context.Background())
+	assert.Contains(t, o.values, vpa.ID)
+
+	delete(cs.vpas, vpa.ID)
+	o.pollOnce(context.Background())
+	assert.NotContains(t, o.values, vpa.ID, "state for deleted VPA must be pruned")
 }
