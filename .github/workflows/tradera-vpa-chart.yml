@@ -65,20 +65,28 @@ jobs:
             --app-version "${{ steps.ver.outputs.appVersion }}" \
             --destination .
 
+      - name: Resolve OCI repo path
+        id: oci
+        run: |
+          # OCI repository references must be lowercase; github.repository
+          # may contain uppercase characters on personal forks.
+          REPO="${{ github.repository }}"
+          echo "repo=${REPO,,}" >> "$GITHUB_OUTPUT"
+
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Push
         run: |
           helm push "vertical-pod-autoscaler-${{ steps.ver.outputs.version }}.tgz" \
-            "oci://ghcr.io/${{ github.repository }}/charts"
+            "oci://ghcr.io/${{ steps.oci.outputs.repo }}/charts"
 
       - name: Summary
         run: |
           {
             echo "### Chart published"
             echo
-            echo "    helm install my-vpa oci://ghcr.io/${{ github.repository }}/charts/vertical-pod-autoscaler --version ${{ steps.ver.outputs.version }}"
+            echo "    helm install my-vpa oci://ghcr.io/${{ steps.oci.outputs.repo }}/charts/vertical-pod-autoscaler --version ${{ steps.ver.outputs.version }}"
             echo
             echo "Resolves to images tagged \`${{ steps.ver.outputs.appVersion }}\` (override per-component with \`--set <component>.image.tag=...\`)."
           } >> "$GITHUB_STEP_SUMMARY"
