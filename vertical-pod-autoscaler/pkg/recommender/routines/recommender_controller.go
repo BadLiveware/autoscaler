@@ -125,8 +125,16 @@ func NewRecommenderController(
 	globalMaxAllowed := initGlobalMaxAllowed(config)
 	postProcessors = append(postProcessors, NewCappingRecommendationProcessor(globalMaxAllowed))
 
+	queryTimeout, err := time.ParseDuration(config.QueryTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("parse query-timeout for prometheus metrics client: %w", err)
+	}
+
 	var source input_metrics.PodMetricsLister
 	if config.UseExternalMetrics {
+		if promAPI == nil {
+			return nil, fmt.Errorf("--use-external-metrics requires --prometheus-address: per-VPA metric annotations now query Prometheus directly")
+		}
 		resourceMetrics := map[corev1.ResourceName]string{}
 		if config.ExternalCpuMetric != "" {
 			resourceMetrics[corev1.ResourceCPU] = config.ExternalCpuMetric
@@ -134,25 +142,35 @@ func NewRecommenderController(
 		if config.ExternalMemoryMetric != "" {
 			resourceMetrics[corev1.ResourceMemory] = config.ExternalMemoryMetric
 		}
-		externalClientOptions := &input_metrics.ExternalClientOptions{
+		prometheusClientOptions := input_metrics.PrometheusClientOptions{
 			ResourceMetrics:    resourceMetrics,
 			PodNameLabel:       config.CtrPodNameLabel,
 			ContainerNameLabel: config.CtrNameLabel,
+			QueryTimeout:       queryTimeout,
 		}
-		klog.V(1).InfoS("Using External Metrics", "options", externalClientOptions)
-		source = input_metrics.NewExternalClient(kubeConfig, clusterState, *externalClientOptions)
+		klog.V(1).InfoS("Using Prometheus metrics source", "options", prometheusClientOptions)
+		source = input_metrics.NewPrometheusClient(promAPI, clusterState, prometheusClientOptions)
 	} else {
-		// Mixed mode: metrics-server is the global default, but VPAs that opt
-		// in via per-VPA annotations are served by external metrics.
+		// Mixed mode: metrics-server is the global default. VPAs that opt in
+		// via external.vpa.k8s.io/{cpu,memory}-metric annotations are served
+		// by the Prometheus client. A nil promAPI here means no Prometheus
+		// address was configured — those annotations silently no-op back to
+		// metrics-server for those VPAs.
 		defaultSource := input_metrics.NewPodMetricsesSource(resourceclient.NewForConfigOrDie(kubeConfig))
-		externalClientOptions := &input_metrics.ExternalClientOptions{
-			PodNameLabel:       config.CtrPodNameLabel,
-			ContainerNameLabel: config.CtrNameLabel,
-			AnnotatedVPAsOnly:  true,
+		if promAPI == nil {
+			klog.V(1).InfoS("Using Metrics Server only (no --prometheus-address; per-VPA metric annotations disabled)")
+			source = defaultSource
+		} else {
+			prometheusClientOptions := input_metrics.PrometheusClientOptions{
+				PodNameLabel:       config.CtrPodNameLabel,
+				ContainerNameLabel: config.CtrNameLabel,
+				QueryTimeout:       queryTimeout,
+				AnnotatedVPAsOnly:  true,
+			}
+			externalSource := input_metrics.NewPrometheusClient(promAPI, clusterState, prometheusClientOptions)
+			klog.V(1).InfoS("Using Metrics Server with per-VPA Prometheus overrides")
+			source = input_metrics.NewMultiSource(defaultSource, externalSource)
 		}
-		externalSource := input_metrics.NewExternalClient(kubeConfig, clusterState, *externalClientOptions)
-		klog.V(1).InfoS("Using Metrics Server with per-VPA external metrics overrides")
-		source = input_metrics.NewMultiSource(defaultSource, externalSource)
 	}
 
 	ignoredNamespaces := strings.Split(commonFlags.IgnoredVpaObjectNamespaces, ",")
