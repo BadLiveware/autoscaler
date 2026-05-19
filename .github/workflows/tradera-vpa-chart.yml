@@ -2,8 +2,8 @@ name: Tradera VPA chart
 
 on:
   push:
+    branches: ["tradera/**", "feat/**"]
     tags: ["vpa-tradera-v*"]
-  pull_request:
     paths:
       - "vertical-pod-autoscaler/charts/vertical-pod-autoscaler/**"
       - ".github/workflows/tradera-vpa-chart.yml"
@@ -30,28 +30,25 @@ jobs:
       - name: Resolve version
         id: ver
         run: |
-          case "${{ github.event_name }}" in
-            workflow_dispatch)
-              VERSION="${{ inputs.version }}"
-              APPVERSION="vpa-tradera-v$VERSION"
-              ;;
-            pull_request)
-              # PR builds produce a pre-release chart pinned to the image
-              # built for the PR head commit (the Tradera VPA images
-              # workflow tags those with the 7-char short sha).
-              HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-              VERSION="0.0.0-pr.${{ github.event.pull_request.number }}.${HEAD_SHA:0:7}"
-              APPVERSION="${HEAD_SHA:0:7}"
-              ;;
-            *)
-              # tag refs/tags/vpa-tradera-v0.9.0  →  0.9.0
-              VERSION="${GITHUB_REF_NAME#vpa-tradera-v}"
-              # Tag image is published with the full git tag; pin appVersion
-              # to that so `helm install` resolves images without an explicit
-              # image.tag override.
-              APPVERSION="vpa-tradera-v$VERSION"
-              ;;
-          esac
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+            APPVERSION="vpa-tradera-v$VERSION"
+          elif [[ "$GITHUB_REF" == refs/tags/vpa-tradera-v* ]]; then
+            # tag refs/tags/vpa-tradera-v0.9.0  →  0.9.0
+            VERSION="${GITHUB_REF_NAME#vpa-tradera-v}"
+            # Tag image is published with the full git tag; pin appVersion
+            # to that so `helm install` resolves images without an explicit
+            # image.tag override.
+            APPVERSION="vpa-tradera-v$VERSION"
+          else
+            # Branch push (tradera/** or feat/**): synthesize a pre-release
+            # chart pinned to the image built for this commit. The Tradera
+            # VPA images workflow tags pushes with the 7-char short sha.
+            SHA7="${GITHUB_SHA:0:7}"
+            BRANCH_SLUG="${GITHUB_REF_NAME//\//-}"
+            VERSION="0.0.0-${BRANCH_SLUG}.${SHA7}"
+            APPVERSION="$SHA7"
+          fi
           if [ -z "$VERSION" ]; then
             echo "version is empty" >&2; exit 1
           fi
