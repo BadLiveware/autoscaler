@@ -18,6 +18,7 @@ package routines
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -133,7 +134,7 @@ func NewRecommenderController(
 	var source input_metrics.PodMetricsLister
 	if config.UseExternalMetrics {
 		if promAPI == nil {
-			return nil, fmt.Errorf("--use-external-metrics requires --prometheus-address: per-VPA metric annotations now query Prometheus directly")
+			return nil, errors.New("--use-external-metrics requires --prometheus-address: per-VPA metric annotations now query Prometheus directly")
 		}
 		resourceMetrics := map[corev1.ResourceName]string{}
 		if config.ExternalCpuMetric != "" {
